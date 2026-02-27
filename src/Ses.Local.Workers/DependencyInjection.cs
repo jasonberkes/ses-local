@@ -41,6 +41,10 @@ public static class DependencyInjection
         // Auth service
         services.AddSingleton<IAuthService, AuthService>();
 
+        // Cloud sync services
+        services.AddSingleton<DocumentServiceUploader>();
+        services.AddSingleton<CloudMemoryRetainer>();
+
         // Auto-updaters
         services.AddHttpClient<SesLocalUpdater>(client =>
         {
