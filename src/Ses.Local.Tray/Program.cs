@@ -22,6 +22,7 @@ internal static class Program
                 services.AddHostedService<CloudSyncWorker>();
                 services.AddHostedService<BrowserExtensionListener>();
                 services.AddHostedService<AutoUpdateWorker>();
+                services.AddHostedService<SesMcpManagerWorker>();
             })
             .Build();
 
