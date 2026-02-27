@@ -1,10 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!-- On Windows, also build the WinRT-enabled TFM so WindowsCredentialStore compiles -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Ses.Local.Core\Ses.Local.Core.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+  </ItemGroup>
+
+  <!-- Windows.Security.Credentials.PasswordVault (WinRT) — Windows TFM only -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows10.0.19041.0'">
+    <PackageReference Include="Microsoft.Windows.SDK.Contracts" />
   </ItemGroup>
 </Project>
