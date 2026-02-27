@@ -45,7 +45,8 @@ public static class DependencyInjection
         services.AddSingleton<DocumentServiceUploader>();
         services.AddSingleton<CloudMemoryRetainer>();
 
-        // Desktop activity event bus (WI-940)
+        // Desktop activity event bus + LevelDB watcher (WI-940)
+        services.AddSingleton<LevelDbUuidExtractor>();
         services.AddSingleton<IDesktopActivityNotifier, DesktopActivityNotifier>();
 
         // Claude.ai API client + sync service (WI-941)
