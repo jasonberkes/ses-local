@@ -52,6 +52,7 @@ public static class DependencyInjection
         });
         services.AddSingleton<SesLocalUpdater>();
         services.AddSingleton<SesMcpUpdater>();
+        services.AddSingleton<SesMcpManager>();
 
         return services;
     }
