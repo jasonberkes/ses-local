@@ -23,6 +23,7 @@ internal static class Program
                 services.AddHostedService<BrowserExtensionListener>();
                 services.AddHostedService<AutoUpdateWorker>();
                 services.AddHostedService<SesMcpManagerWorker>();
+                services.AddHostedService<ClaudeDesktopSyncWorker>();
             })
             .Build();
 
