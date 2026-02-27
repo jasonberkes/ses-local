@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ses.Local.Workers\Ses.Local.Workers.csproj" />
+    <ProjectReference Include="..\..\src\Ses.Local.Tray\Ses.Local.Tray.csproj" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
