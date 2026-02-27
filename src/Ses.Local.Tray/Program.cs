@@ -1,6 +1,7 @@
 using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Ses.Local.Workers;
 using Ses.Local.Workers.Workers;
 
 namespace Ses.Local.Tray;
@@ -13,6 +14,7 @@ internal static class Program
         var host = Host.CreateDefaultBuilder(args)
             .ConfigureServices(services =>
             {
+                services.AddSesLocalWorkers();
                 services.AddHostedService<LevelDbWatcher>();
                 services.AddHostedService<ClaudeCodeWatcher>();
                 services.AddHostedService<CoworkWatcher>();
