@@ -54,12 +54,15 @@ jobs:
         include:
           - rid: osx-arm64
             os: macos-latest
+            src: Ses.Local.Tray
             binary: ses-local
           - rid: osx-x64
             os: macos-latest
+            src: Ses.Local.Tray
             binary: ses-local
           - rid: win-x64
             os: windows-latest
+            src: Ses.Local.Tray.exe
             binary: ses-local.exe
     steps:
       - uses: actions/checkout@v4
@@ -85,8 +88,11 @@ jobs:
             --runtime ${{ matrix.rid }} \
             -p:PublishSingleFile=true \
             -p:SelfContained=true \
-            -p:AssemblyName=ses-local \
             --output ./publish/${{ matrix.rid }}
+
+      - name: Rename binary
+        shell: bash
+        run: mv ./publish/${{ matrix.rid }}/${{ matrix.src }} ./publish/${{ matrix.rid }}/${{ matrix.binary }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
