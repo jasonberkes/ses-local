@@ -78,6 +78,9 @@ public sealed class SesMcpManager
         status.IsConfigured  = configured;
         status.HasConfigDrift = hasDrift;
 
+        // 4. Register ses-hooks in ~/.claude/settings.json for Claude Code
+        await CheckAndRepairClaudeCodeHooksAsync(ct);
+
         return status;
     }
 
@@ -276,5 +279,58 @@ public sealed class SesMcpManager
         }
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return Path.Combine(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+    }
+
+    // ── Claude Code Hooks ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Ensures ses-hooks is registered in ~/.claude/settings.json for all 6 CC lifecycle events.
+    /// Runs on startup and every 30 minutes as part of the existing SesMcpManagerWorker cadence.
+    /// No-op if Claude Code is not installed (~/.claude/ does not exist).
+    /// </summary>
+    public async Task CheckAndRepairClaudeCodeHooksAsync(CancellationToken ct = default)
+    {
+        var settingsPath = GetClaudeCodeSettingsPath();
+        var hooksPath    = GetSesHooksBinaryPath();
+
+        if (!Directory.Exists(Path.GetDirectoryName(settingsPath)))
+        {
+            _logger.LogDebug("Claude Code not installed (~/.claude/ not found) — skipping hooks registration");
+            return;
+        }
+
+        if (!File.Exists(hooksPath))
+        {
+            _logger.LogDebug("ses-hooks binary not found at {Path} — skipping registration", hooksPath);
+            return;
+        }
+
+        var settings = ClaudeCodeSettings.LoadOrCreate(settingsPath);
+
+        if (settings.HasCorrectHooks(hooksPath))
+        {
+            _logger.LogDebug("Claude Code hooks already correctly registered");
+            return;
+        }
+
+        _logger.LogInformation("Registering/repairing ses-hooks in Claude Code settings: {Path}", settingsPath);
+        settings.UpsertSesHooks(hooksPath);
+        settings.Save(settingsPath);
+        _logger.LogInformation("ses-hooks registered for all 6 events in {Path}", settingsPath);
+
+        await Task.CompletedTask;
+    }
+
+    public static string GetClaudeCodeSettingsPath()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, ".claude", "settings.json");
+    }
+
+    public static string GetSesHooksBinaryPath()
+    {
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var ext  = OperatingSystem.IsWindows() ? ".exe" : string.Empty;
+        return Path.Combine(home, ".ses", "bin", $"ses-hooks{ext}");
     }
 }
