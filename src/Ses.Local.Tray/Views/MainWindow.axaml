@@ -1,0 +1,126 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Ses.Local.Tray.ViewModels"
+        x:Class="Ses.Local.Tray.Views.MainWindow"
+        Title="ses-local"
+        Width="400" Height="600"
+        MinWidth="400" MaxWidth="400"
+        MinHeight="600" MaxHeight="600"
+        CanResize="False"
+        Topmost="True"
+        ShowInTaskbar="False"
+        WindowStartupLocation="Manual">
+  <Window.Styles>
+    <Style Selector="TextBlock.sectionHeader">
+      <Setter Property="FontSize" Value="11"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="#888"/>
+      <Setter Property="Margin" Value="16,12,0,4"/>
+    </Style>
+    <Style Selector="Border.featureRow">
+      <Setter Property="Padding" Value="16,8"/>
+      <Setter Property="BorderThickness" Value="0,0,0,1"/>
+      <Setter Property="BorderBrush" Value="#1A000000"/>
+    </Style>
+    <Style Selector="Ellipse.statusDot">
+      <Setter Property="Width" Value="8"/>
+      <Setter Property="Height" Value="8"/>
+      <Setter Property="Margin" Value="0,0,8,0"/>
+    </Style>
+  </Window.Styles>
+
+  <DockPanel>
+    <!-- Header -->
+    <Border DockPanel.Dock="Top" Background="#1C1C1E" Padding="16,12">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Orientation="Vertical">
+          <TextBlock Text="ses-local" FontSize="16" FontWeight="Bold" Foreground="White"/>
+          <TextBlock Text="{Binding UserDisplayName}" FontSize="12" Foreground="#888"/>
+        </StackPanel>
+        <Button Grid.Column="1" Content="Sign Out" FontSize="12"
+                Background="Transparent" Foreground="#888"
+                Click="OnSignOutClick"/>
+      </Grid>
+    </Border>
+
+    <!-- Footer -->
+    <Border DockPanel.Dock="Bottom" Background="#1C1C1E" Padding="16,8">
+      <Grid ColumnDefinitions="*,Auto,Auto">
+        <TextBlock Text="{Binding AppVersion, StringFormat='v{0}'}"
+                   FontSize="11" Foreground="#555" VerticalAlignment="Center"/>
+        <Button Grid.Column="1" Content="Troubleshoot" FontSize="11"
+                Background="Transparent" Foreground="#888" Margin="0,0,8,0"
+                Click="OnTroubleshootClick"/>
+        <Button Grid.Column="2" Content="Quit" FontSize="11"
+                Background="Transparent" Foreground="#888"
+                Click="OnQuitClick"/>
+      </Grid>
+    </Border>
+
+    <!-- Onboarding banner (first run only) -->
+    <Border IsVisible="{Binding IsFirstRun}" DockPanel.Dock="Top"
+            Background="#0A3055" Padding="16,10" Margin="0,0,0,1">
+      <TextBlock Text="Welcome! Toggle features below to get started."
+                 Foreground="#7EC8E3" FontSize="12" TextWrapping="Wrap"/>
+    </Border>
+
+    <!-- Scrollable content -->
+    <ScrollViewer>
+      <StackPanel>
+        <!-- Conversation Sync section -->
+        <TextBlock Text="CONVERSATION SYNC" Classes="sectionHeader"/>
+        <ItemsControl ItemsSource="{Binding ConvSyncFeatures}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Classes="featureRow">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto">
+                  <!-- Status dot -->
+                  <Ellipse Classes="statusDot" VerticalAlignment="Center"
+                           Fill="{Binding Dot, Converter={StaticResource DotColorConverter}}"/>
+                  <!-- Name + last activity -->
+                  <StackPanel Grid.Column="1" Orientation="Vertical">
+                    <TextBlock Text="{Binding Name}" FontSize="13"/>
+                    <TextBlock Text="{Binding LastActivity}" FontSize="11" Foreground="#888"/>
+                  </StackPanel>
+                  <!-- Coming soon badge -->
+                  <Border Grid.Column="2" IsVisible="{Binding IsComingSoon}"
+                          Background="#333" CornerRadius="4" Padding="4,2" Margin="0,0,8,0">
+                    <TextBlock Text="soon" FontSize="10" Foreground="#888"/>
+                  </Border>
+                  <!-- Toggle -->
+                  <ToggleSwitch Grid.Column="3" IsChecked="{Binding IsEnabled}"
+                                IsEnabled="{Binding IsComingSoon, Converter={x:Static BoolConverters.Not}}"
+                                OnContent="" OffContent=""
+                                Checked="OnFeatureToggled" Unchecked="OnFeatureToggled"/>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- Memory section -->
+        <TextBlock Text="MEMORY" Classes="sectionHeader"/>
+        <ItemsControl ItemsSource="{Binding MemoryFeatures}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Classes="featureRow">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                  <Ellipse Classes="statusDot" VerticalAlignment="Center"
+                           Fill="{Binding Dot, Converter={StaticResource DotColorConverter}}"/>
+                  <StackPanel Grid.Column="1" Orientation="Vertical">
+                    <TextBlock Text="{Binding Name}" FontSize="13"/>
+                    <TextBlock Text="{Binding LastActivity}" FontSize="11" Foreground="#888"/>
+                  </StackPanel>
+                  <ToggleSwitch Grid.Column="2" IsChecked="{Binding IsEnabled}"
+                                OnContent="" OffContent=""
+                                Checked="OnFeatureToggled" Unchecked="OnFeatureToggled"/>
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>
