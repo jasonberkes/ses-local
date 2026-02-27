@@ -110,6 +110,9 @@ public sealed class AuthService : IAuthService
         return Task.CompletedTask;
     }
 
+    public async Task<string?> GetPatAsync(CancellationToken ct = default) =>
+        await _keychain.GetAsync(KeyPat, ct);
+
     // ── Private ───────────────────────────────────────────────────────────────
 
     private async Task<string?> RenewAccessTokenAsync(CancellationToken ct)

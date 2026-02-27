@@ -25,4 +25,7 @@ public interface IAuthService
 
     /// <summary>Open browser to re-auth login page (refresh token expired).</summary>
     Task TriggerReauthAsync(CancellationToken ct = default);
+
+    /// <summary>Gets the current MCP PAT for use by the browser extension listener.</summary>
+    Task<string?> GetPatAsync(CancellationToken ct = default);
 }
