@@ -1,0 +1,39 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**/*.md', '.gitignore']
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Authenticate NuGet feed
+        run: dotnet nuget update source tm-packages --username az --password ${{ secrets.AZURE_DEVOPS_PAT }} --store-password-in-clear-text --configfile nuget.config
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore & Build
+        run: dotnet build ses-local.sln -c Release
+
+      - name: Test
+        run: dotnet test ses-local.sln -c Release --no-build --verbosity normal
