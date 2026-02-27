@@ -2,6 +2,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Ses.Local.Workers\Ses.Local.Workers.csproj" />
     <ProjectReference Include="..\..\src\Ses.Local.Tray\Ses.Local.Tray.csproj" />
+    <ProjectReference Include="..\..\src\Ses.Local.Hooks\Ses.Local.Hooks.csproj" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
