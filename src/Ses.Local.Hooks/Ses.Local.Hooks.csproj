@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ses-hooks</AssemblyName>
+    <!-- Only AOT on explicit publish; allows normal dotnet build for dev/CI -->
+    <PublishAot Condition="'$(PublishSingleFile)' == 'true'">true</PublishAot>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <StripSymbols>true</StripSymbols>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Ses.Local.Core\Ses.Local.Core.csproj" />
+  </ItemGroup>
+</Project>
