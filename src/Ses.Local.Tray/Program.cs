@@ -12,9 +12,9 @@ internal static class Program
     public static async Task Main(string[] args)
     {
         var host = Host.CreateDefaultBuilder(args)
-            .ConfigureServices(services =>
+            .ConfigureServices((ctx, services) =>
             {
-                services.AddSesLocalWorkers();
+                services.AddSesLocalWorkers(ctx.Configuration);
                 services.AddHostedService<LevelDbWatcher>();
                 services.AddHostedService<ClaudeCodeWatcher>();
                 services.AddHostedService<CoworkWatcher>();
