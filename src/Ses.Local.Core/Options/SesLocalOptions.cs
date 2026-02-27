@@ -9,6 +9,9 @@ public sealed class SesLocalOptions
 {
     public const string SectionName = "SesLocal";
 
+    /// <summary>Identity server base URL.</summary>
+    public string IdentityBaseUrl { get; init; } = "https://identity.tm.supereasysoftware.com";
+
     /// <summary>Enable Claude Code JSONL session watcher. Requires developer scope.</summary>
     public bool EnableClaudeCodeSync { get; set; } = true;
 

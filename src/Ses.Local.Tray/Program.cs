@@ -15,6 +15,7 @@ internal static class Program
             .ConfigureServices((ctx, services) =>
             {
                 services.AddSesLocalWorkers(ctx.Configuration);
+                services.AddSingleton<UriSchemeHandler>();
                 services.AddHostedService<LevelDbWatcher>();
                 services.AddHostedService<ClaudeCodeWatcher>();
                 services.AddHostedService<CoworkWatcher>();
