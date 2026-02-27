@@ -1,0 +1,199 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - '.gitignore'
+
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Authenticate NuGet
+        run: |
+          dotnet nuget update source tm-packages \
+            --username az \
+            --password ${{ secrets.AZURE_DEVOPS_PAT }} \
+            --store-password-in-clear-text \
+            --configfile nuget.config
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Build
+        run: dotnet build ses-local.sln -c Release
+
+      - name: Test
+        run: dotnet test ses-local.sln -c Release --no-build --verbosity normal
+
+  publish:
+    name: Publish ${{ matrix.rid }}
+    needs: build-and-test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        include:
+          - rid: osx-arm64
+            os: macos-latest
+            binary: ses-local
+          - rid: osx-x64
+            os: macos-latest
+            binary: ses-local
+          - rid: win-x64
+            os: windows-latest
+            binary: ses-local.exe
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Authenticate NuGet
+        shell: bash
+        run: |
+          dotnet nuget update source tm-packages \
+            --username az \
+            --password ${{ secrets.AZURE_DEVOPS_PAT }} \
+            --store-password-in-clear-text \
+            --configfile nuget.config
+
+      - name: Publish
+        shell: bash
+        run: |
+          dotnet publish src/Ses.Local.Tray/Ses.Local.Tray.csproj \
+            --configuration Release \
+            --runtime ${{ matrix.rid }} \
+            -p:PublishSingleFile=true \
+            -p:SelfContained=true \
+            -p:AssemblyName=ses-local \
+            --output ./publish/${{ matrix.rid }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}
+          path: ./publish/${{ matrix.rid }}/${{ matrix.binary }}
+          if-no-files-found: error
+
+  upload-blob:
+    name: Upload to Blob + Write Manifest
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Set version
+        id: version
+        run: |
+          VERSION="$(date -u +%Y.%m.%d).${GITHUB_SHA:0:7}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Upload binaries
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          az storage blob upload \
+            --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
+            --container-name artifacts \
+            --name "ses-local/$V/ses-local-osx-arm64" \
+            --file ./artifacts/osx-arm64/ses-local \
+            --overwrite
+          az storage blob upload \
+            --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
+            --container-name artifacts \
+            --name "ses-local/$V/ses-local-osx-x64" \
+            --file ./artifacts/osx-x64/ses-local \
+            --overwrite
+          az storage blob upload \
+            --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
+            --container-name artifacts \
+            --name "ses-local/$V/ses-local-win-x64.exe" \
+            --file ./artifacts/win-x64/ses-local.exe \
+            --overwrite
+
+      - name: Write latest.json
+        run: |
+          V="${{ steps.version.outputs.version }}"
+          BASE="https://downloads.supereasysoftware.com/artifacts/ses-local"
+          cat > latest.json << EOF
+          {
+            "version": "$V",
+            "published": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "binaries": {
+              "osx-arm64": "$BASE/$V/ses-local-osx-arm64",
+              "osx-x64":   "$BASE/$V/ses-local-osx-x64",
+              "win-x64":   "$BASE/$V/ses-local-win-x64.exe"
+            }
+          }
+          EOF
+          az storage blob upload \
+            --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
+            --container-name artifacts \
+            --name "ses-local/latest.json" \
+            --file ./latest.json \
+            --overwrite
+          echo "Published:"
+          cat latest.json
+
+  github-release:
+    name: GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: tibdex/github-app-token@v2
+        with:
+          app_id: ${{ secrets.GH_APP_ID }}
+          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Stage binaries
+        run: |
+          cp ./artifacts/osx-arm64/ses-local ./ses-local-osx-arm64
+          cp ./artifacts/osx-x64/ses-local ./ses-local-osx-x64
+          cp ./artifacts/win-x64/ses-local.exe ./ses-local-win-x64.exe
+          chmod +x ./ses-local-osx-arm64 ./ses-local-osx-x64
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          tag_name: "build-${{ github.sha }}"
+          name: "Build ${{ github.sha }}"
+          generate_release_notes: true
+          prerelease: true
+          files: |
+            ses-local-osx-arm64
+            ses-local-osx-x64
+            ses-local-win-x64.exe
