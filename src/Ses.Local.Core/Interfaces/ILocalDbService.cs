@@ -12,5 +12,6 @@ public interface ILocalDbService
     Task UpsertMessagesAsync(IEnumerable<ConversationMessage> messages, CancellationToken ct = default);
     Task<IReadOnlyList<ConversationSession>> GetPendingSyncAsync(int batchSize = 10, CancellationToken ct = default);
     Task MarkSyncedAsync(long sessionId, string? docServiceId, CancellationToken ct = default);
+    Task<IReadOnlyList<ConversationMessage>> GetMessagesAsync(long sessionId, CancellationToken ct = default);
     Task<IReadOnlyList<ConversationMessage>> SearchAsync(string query, int limit = 10, CancellationToken ct = default);
 }

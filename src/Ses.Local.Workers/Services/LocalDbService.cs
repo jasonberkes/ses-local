@@ -138,6 +138,26 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task<IReadOnlyList<ConversationMessage>> GetMessagesAsync(long sessionId, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, session_id, role, content, created_at, token_count
+            FROM conv_messages
+            WHERE session_id = @session_id
+            ORDER BY created_at
+            """;
+        cmd.Parameters.AddWithValue("@session_id", sessionId);
+
+        var results = new List<ConversationMessage>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapMessage(reader));
+
+        return results;
+    }
+
     public async Task<IReadOnlyList<ConversationMessage>> SearchAsync(string query, int limit = 10, CancellationToken ct = default)
     {
         var conn = await GetConnectionAsync(ct);

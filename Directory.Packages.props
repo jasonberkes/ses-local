@@ -9,7 +9,7 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.3" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.1" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.3" />
     <!-- Avalonia cross-platform UI -->
     <!-- Avalonia is a NuGet PACKAGE, not a .NET SDK. Latest stable: 11.3.12. Do NOT use 12.x (preview). -->
@@ -21,6 +21,8 @@
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.4.0" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.3" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.3" />
+    <!-- TaskMaster client libraries -->
+    <PackageVersion Include="TaskMaster.DocumentService.Client" Version="1.2.0" />
     <!-- Windows WinRT (used only for net10.0-windows TFM in Ses.Local.Workers) -->
     <PackageVersion Include="Microsoft.Windows.SDK.Contracts" Version="10.0.26100.1742" />
     <!-- Testing -->
