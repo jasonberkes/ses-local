@@ -21,11 +21,17 @@ internal static class Program
                 services.AddHostedService<CoworkWatcher>();
                 services.AddHostedService<CloudSyncWorker>();
                 services.AddHostedService<BrowserExtensionListener>();
+                services.AddHostedService<AutoUpdateWorker>();
             })
             .Build();
 
         await host.StartAsync();
-        BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+
+        var app = BuildAvaloniaApp();
+        if (app.Instance is TrayApp trayApp)
+            trayApp.SetServiceProvider(host.Services);
+
+        app.StartWithClassicDesktopLifetime(args);
         await host.StopAsync();
     }
 
