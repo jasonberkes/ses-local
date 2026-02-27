@@ -21,6 +21,7 @@ internal static class Program
                 services.AddHostedService<CoworkWatcher>();
                 services.AddHostedService<CloudSyncWorker>();
                 services.AddHostedService<BrowserExtensionListener>();
+                services.AddHostedService<AutoUpdateWorker>();
             })
             .Build();
 

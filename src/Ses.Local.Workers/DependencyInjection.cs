@@ -41,6 +41,18 @@ public static class DependencyInjection
         // Auth service
         services.AddSingleton<IAuthService, AuthService>();
 
+        // Auto-updaters
+        services.AddHttpClient<SesLocalUpdater>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddHttpClient<SesMcpUpdater>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddSingleton<SesLocalUpdater>();
+        services.AddSingleton<SesMcpUpdater>();
+
         return services;
     }
 }
