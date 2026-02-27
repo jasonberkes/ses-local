@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "ses-local: Claude Sync",
+  "version": "1.0.0",
+  "description": "Syncs your Claude conversations to ses-local for memory and search.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*",
+    "http://localhost:37780/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16":  "icons/icon16.png",
+    "48":  "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "default-src 'self'; connect-src https://claude.ai http://localhost:37780"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ses-local-sync@supereasysoftware.com",
+      "strict_min_version": "109.0"
+    }
+  }
+}
