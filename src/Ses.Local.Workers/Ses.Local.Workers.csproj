@@ -21,6 +21,7 @@
     <PackageReference Include="Microsoft.Extensions.Options" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="TaskMaster.DocumentService.Client" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
   </ItemGroup>
 
   <!-- Windows.Security.Credentials.PasswordVault (WinRT) — Windows TFM only -->
