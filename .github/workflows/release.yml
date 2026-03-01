@@ -100,7 +100,9 @@ jobs:
         run: |
           BINARY="./publish/${{ matrix.rid }}/ses-local"
           chmod +x "$BINARY"
-          APP="./publish/${{ matrix.rid }}/ses-local-installer.app"
+
+          # Build .app bundle
+          APP="./ses-local-installer.app"
           mkdir -p "$APP/Contents/MacOS"
           cp "$BINARY" "$APP/Contents/MacOS/ses-local-installer"
           cat > "$APP/Contents/Info.plist" << 'PLIST'
@@ -116,11 +118,15 @@ jobs:
             <key>LSUIElement</key><true/>
           </dict></plist>
           PLIST
+
+          # Free up disk space before creating DMG
+          rm -rf ./publish
+
           hdiutil create \
             -volname "ses-local Installer" \
             -srcfolder "$APP" \
             -ov -format UDZO \
-            "./publish/${{ matrix.rid }}/ses-local-installer.dmg"
+            "./ses-local-installer.dmg"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -134,7 +140,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.rid }}-dmg
-          path: ./publish/${{ matrix.rid }}/ses-local-installer.dmg
+          path: ./ses-local-installer.dmg
           if-no-files-found: error
 
   upload-blob:
