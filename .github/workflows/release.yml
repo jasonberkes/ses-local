@@ -94,11 +94,47 @@ jobs:
         shell: bash
         run: mv ./publish/${{ matrix.rid }}/${{ matrix.src }} ./publish/${{ matrix.rid }}/${{ matrix.binary }}
 
+      - name: Package DMG (macOS only)
+        if: startsWith(matrix.rid, 'osx-')
+        shell: bash
+        run: |
+          BINARY="./publish/${{ matrix.rid }}/ses-local"
+          chmod +x "$BINARY"
+          APP="./publish/${{ matrix.rid }}/ses-local-installer.app"
+          mkdir -p "$APP/Contents/MacOS"
+          cp "$BINARY" "$APP/Contents/MacOS/ses-local-installer"
+          cat > "$APP/Contents/Info.plist" << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleExecutable</key><string>ses-local-installer</string>
+            <key>CFBundleIdentifier</key><string>com.supereasysoftware.ses-local-installer</string>
+            <key>CFBundleName</key><string>ses-local Installer</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>1.0</string>
+            <key>LSMinimumSystemVersion</key><string>13.0</string>
+            <key>LSUIElement</key><true/>
+          </dict></plist>
+          PLIST
+          hdiutil create \
+            -volname "ses-local Installer" \
+            -srcfolder "$APP" \
+            -ov -format UDZO \
+            "./publish/${{ matrix.rid }}/ses-local-installer.dmg"
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.rid }}
           path: ./publish/${{ matrix.rid }}/${{ matrix.binary }}
+          if-no-files-found: error
+
+      - name: Upload DMG artifact (macOS only)
+        if: startsWith(matrix.rid, 'osx-')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.rid }}-dmg
+          path: ./publish/${{ matrix.rid }}/ses-local-installer.dmg
           if-no-files-found: error
 
   upload-blob:
@@ -122,17 +158,18 @@ jobs:
       - name: Upload binaries
         run: |
           V="${{ steps.version.outputs.version }}"
+
           az storage blob upload \
             --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
             --container-name artifacts \
-            --name "ses-local/$V/ses-local-osx-arm64" \
-            --file ./artifacts/osx-arm64/ses-local \
+            --name "ses-local/$V/ses-local-osx-arm64.dmg" \
+            --file ./artifacts/osx-arm64-dmg/ses-local-installer.dmg \
             --overwrite
           az storage blob upload \
             --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
             --container-name artifacts \
-            --name "ses-local/$V/ses-local-osx-x64" \
-            --file ./artifacts/osx-x64/ses-local \
+            --name "ses-local/$V/ses-local-osx-x64.dmg" \
+            --file ./artifacts/osx-x64-dmg/ses-local-installer.dmg \
             --overwrite
           az storage blob upload \
             --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
@@ -150,8 +187,8 @@ jobs:
             "version": "$V",
             "published": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "binaries": {
-              "osx-arm64": "$BASE/$V/ses-local-osx-arm64",
-              "osx-x64":   "$BASE/$V/ses-local-osx-x64",
+              "osx-arm64": "$BASE/$V/ses-local-osx-arm64.dmg",
+              "osx-x64":   "$BASE/$V/ses-local-osx-x64.dmg",
               "win-x64":   "$BASE/$V/ses-local-win-x64.exe"
             }
           }
