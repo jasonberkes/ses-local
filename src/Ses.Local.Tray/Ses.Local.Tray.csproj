@@ -6,6 +6,9 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Assets\tray-icon.png" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Ses.Local.Core\Ses.Local.Core.csproj" />
     <ProjectReference Include="..\Ses.Local.Workers\Ses.Local.Workers.csproj" />
     <PackageReference Include="Avalonia" />
