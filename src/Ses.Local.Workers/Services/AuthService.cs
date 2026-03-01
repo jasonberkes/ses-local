@@ -194,18 +194,18 @@ public sealed class AuthService : IAuthService
         }
     }
 
-    private static void OpenBrowser(string url)
+    private void OpenBrowser(string url)
     {
         try
         {
             if (OperatingSystem.IsMacOS())
-                System.Diagnostics.Process.Start("open", url);
+                System.Diagnostics.Process.Start("/usr/bin/open", url);
             else if (OperatingSystem.IsWindows())
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Best effort
+            _logger.LogError(ex, "Failed to open browser for URL: {Url}", url);
         }
     }
 }
