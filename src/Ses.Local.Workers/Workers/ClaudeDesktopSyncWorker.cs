@@ -55,12 +55,15 @@ public sealed class ClaudeDesktopSyncWorker : BackgroundService
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(5));
         try
         {
+            Task<bool>? pollTask = null;
             while (!stoppingToken.IsCancellationRequested)
             {
-                var pollTask    = timer.WaitForNextTickAsync(stoppingToken).AsTask();
+                // Only create a new poll task if the previous one completed
+                pollTask ??= timer.WaitForNextTickAsync(stoppingToken).AsTask();
                 var channelTask = _queue.Reader.WaitToReadAsync(stoppingToken).AsTask();
 
-                await Task.WhenAny(pollTask, channelTask);
+                var completed = await Task.WhenAny(pollTask, channelTask);
+                if (completed == pollTask) pollTask = null; // allow next tick to be awaited
 
                 // Collect all queued events and merge UUID lists
                 var allUuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
