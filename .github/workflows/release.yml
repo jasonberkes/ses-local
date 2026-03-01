@@ -56,10 +56,6 @@ jobs:
             os: macos-latest
             src: Ses.Local.Tray
             binary: ses-local
-          - rid: osx-x64
-            os: macos-latest
-            src: Ses.Local.Tray
-            binary: ses-local
           - rid: win-x64
             os: windows-latest
             src: Ses.Local.Tray.exe
@@ -176,12 +172,6 @@ jobs:
           az storage blob upload \
             --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
             --container-name artifacts \
-            --name "ses-local/$V/ses-local-osx-x64.dmg" \
-            --file ./artifacts/osx-x64-dmg/ses-local-installer.dmg \
-            --overwrite
-          az storage blob upload \
-            --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
-            --container-name artifacts \
             --name "ses-local/$V/ses-local-win-x64.exe" \
             --file ./artifacts/win-x64/ses-local.exe \
             --overwrite
@@ -196,7 +186,6 @@ jobs:
             "published": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "binaries": {
               "osx-arm64": "$BASE/$V/ses-local-osx-arm64.dmg",
-              "osx-x64":   "$BASE/$V/ses-local-osx-x64.dmg",
               "win-x64":   "$BASE/$V/ses-local-win-x64.exe"
             }
           }
