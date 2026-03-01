@@ -7,132 +7,139 @@ using System.Text;
 namespace Ses.Local.Workers.Services;
 
 /// <summary>
-/// macOS keychain implementation using Security.framework via P/Invoke.
-/// Service: SuperEasySoftware.TaskMaster
+/// macOS keychain implementation using modern SecItem APIs (Security.framework).
+/// Uses SecItemCopyMatching / SecItemAdd / SecItemUpdate — works without code signing.
+/// Service: SuperEasySoftware.SesLocal
 /// </summary>
 [SupportedOSPlatform("macos")]
 public sealed class MacCredentialStore : ICredentialStore
 {
-    private const string ServiceName = "SuperEasySoftware.TaskMaster";
+    private const string ServiceName = "SuperEasySoftware.SesLocal";
     private readonly ILogger<MacCredentialStore> _logger;
 
     public MacCredentialStore(ILogger<MacCredentialStore> logger) => _logger = logger;
 
     public Task<string?> GetAsync(string key, CancellationToken ct = default)
     {
-        var serviceBytes = Encoding.UTF8.GetBytes(ServiceName);
-        var accountBytes = Encoding.UTF8.GetBytes(key);
+        var query = CreateQuery(key);
+        CFDictionarySetValue(query, kSecReturnData, kCFBooleanTrue);
+        CFDictionarySetValue(query, kSecMatchLimit, kSecMatchLimitOne);
 
-        int status = SecKeychainFindGenericPassword(
-            IntPtr.Zero,
-            (uint)serviceBytes.Length, serviceBytes,
-            (uint)accountBytes.Length, accountBytes,
-            out uint dataLen, out IntPtr data,
-            IntPtr.Zero);
+        int status = SecItemCopyMatching(query, out IntPtr result);
+        CFRelease(query);
 
-        if (status == 0 && data != IntPtr.Zero)
+        if (status != 0 || result == IntPtr.Zero)
+            return Task.FromResult<string?>(null);
+
+        try
         {
-            try
-            {
-                var bytes = new byte[dataLen];
-                Marshal.Copy(data, bytes, 0, (int)dataLen);
-                SecKeychainItemFreeContent(IntPtr.Zero, data);
-                return Task.FromResult<string?>(Encoding.UTF8.GetString(bytes));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to read keychain item: {Key}", key);
-            }
+            int len = CFDataGetLength(result);
+            IntPtr ptr = CFDataGetBytePtr(result);
+            byte[] bytes = new byte[len];
+            Marshal.Copy(ptr, bytes, 0, len);
+            CFRelease(result);
+            return Task.FromResult<string?>(Encoding.UTF8.GetString(bytes));
         }
-
-        return Task.FromResult<string?>(null);
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read keychain item: {Key}", key);
+            if (result != IntPtr.Zero) CFRelease(result);
+            return Task.FromResult<string?>(null);
+        }
     }
 
     public Task SetAsync(string key, string value, CancellationToken ct = default)
     {
-        var serviceBytes = Encoding.UTF8.GetBytes(ServiceName);
-        var accountBytes = Encoding.UTF8.GetBytes(key);
-        var valueBytes   = Encoding.UTF8.GetBytes(value);
+        var valueBytes = Encoding.UTF8.GetBytes(value);
+        var data = CFDataCreate(IntPtr.Zero, valueBytes, valueBytes.Length);
 
         // Try update first
-        int status = SecKeychainFindGenericPassword(
-            IntPtr.Zero,
-            (uint)serviceBytes.Length, serviceBytes,
-            (uint)accountBytes.Length, accountBytes,
-            out _, out _,
-            out IntPtr itemRef);
+        var query = CreateQuery(key);
+        var update = CFDictionaryCreateMutable(IntPtr.Zero, 1, IntPtr.Zero, IntPtr.Zero);
+        CFDictionarySetValue(update, kSecValueData, data);
 
-        if (status == 0 && itemRef != IntPtr.Zero)
+        int status = SecItemUpdate(query, update);
+        CFRelease(query);
+        CFRelease(update);
+
+        if (status != 0) // Item doesn't exist — add it
         {
-            SecKeychainItemModifyAttributesAndData(itemRef, IntPtr.Zero, (uint)valueBytes.Length, valueBytes);
-        }
-        else
-        {
-            status = SecKeychainAddGenericPassword(
-                IntPtr.Zero,
-                (uint)serviceBytes.Length, serviceBytes,
-                (uint)accountBytes.Length, accountBytes,
-                (uint)valueBytes.Length, valueBytes,
-                IntPtr.Zero);
+            var addQuery = CreateQuery(key);
+            CFDictionarySetValue(addQuery, kSecValueData, data);
+            status = SecItemAdd(addQuery, IntPtr.Zero);
+            CFRelease(addQuery);
 
             if (status != 0)
-                _logger.LogWarning("SecKeychainAddGenericPassword failed with status {Status} for key {Key}", status, key);
+                _logger.LogWarning("SecItemAdd failed with status {Status} for key {Key}", status, key);
         }
 
+        CFRelease(data);
         return Task.CompletedTask;
     }
 
     public Task DeleteAsync(string key, CancellationToken ct = default)
     {
-        var serviceBytes = Encoding.UTF8.GetBytes(ServiceName);
-        var accountBytes = Encoding.UTF8.GetBytes(key);
-
-        int status = SecKeychainFindGenericPassword(
-            IntPtr.Zero,
-            (uint)serviceBytes.Length, serviceBytes,
-            (uint)accountBytes.Length, accountBytes,
-            out _, out _,
-            out IntPtr itemRef);
-
-        if (status == 0 && itemRef != IntPtr.Zero)
-            SecKeychainItemDelete(itemRef);
-
+        var query = CreateQuery(key);
+        SecItemDelete(query);
+        CFRelease(query);
         return Task.CompletedTask;
     }
 
-    // P/Invoke declarations
-    [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-    private static extern int SecKeychainFindGenericPassword(
-        IntPtr keychainOrArray,
-        uint serviceNameLength, byte[] serviceName,
-        uint accountNameLength, byte[] accountName,
-        out uint passwordLength, out IntPtr passwordData,
-        out IntPtr itemRef);
+    // ── Helpers ──────────────────────────────────────────────────────────────
 
-    [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-    private static extern int SecKeychainFindGenericPassword(
-        IntPtr keychainOrArray,
-        uint serviceNameLength, byte[] serviceName,
-        uint accountNameLength, byte[] accountName,
-        out uint passwordLength, out IntPtr passwordData,
-        IntPtr itemRef);
+    private static IntPtr CreateQuery(string account)
+    {
+        var dict = CFDictionaryCreateMutable(IntPtr.Zero, 4, IntPtr.Zero, IntPtr.Zero);
+        CFDictionarySetValue(dict, kSecClass, kSecClassGenericPassword);
+        CFDictionarySetValue(dict, kSecAttrService, CFStringCreateWithCString(IntPtr.Zero, ServiceName, 0x08000100));
+        CFDictionarySetValue(dict, kSecAttrAccount, CFStringCreateWithCString(IntPtr.Zero, account,     0x08000100));
+        return dict;
+    }
 
-    [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-    private static extern int SecKeychainAddGenericPassword(
-        IntPtr keychain,
-        uint serviceNameLength, byte[] serviceName,
-        uint accountNameLength, byte[] accountName,
-        uint passwordLength, byte[] passwordData,
-        IntPtr itemRef);
+    // ── CoreFoundation P/Invokes ──────────────────────────────────────────────
 
-    [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-    private static extern int SecKeychainItemModifyAttributesAndData(
-        IntPtr itemRef, IntPtr attrList,
-        uint passwordLength, byte[] passwordData);
+    private const string CF = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+    private const string Sec = "/System/Library/Frameworks/Security.framework/Security";
 
-    [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-    private static extern int SecKeychainItemDelete(IntPtr itemRef);
+    [DllImport(CF)] private static extern IntPtr CFDictionaryCreateMutable(IntPtr alloc, long capacity, IntPtr keyCallbacks, IntPtr valueCallbacks);
+    [DllImport(CF)] private static extern void   CFDictionarySetValue(IntPtr dict, IntPtr key, IntPtr value);
+    [DllImport(CF)] private static extern void   CFRelease(IntPtr cf);
+    [DllImport(CF)] private static extern IntPtr CFDataCreate(IntPtr alloc, byte[] bytes, long length);
+    [DllImport(CF)] private static extern int    CFDataGetLength(IntPtr data);
+    [DllImport(CF)] private static extern IntPtr CFDataGetBytePtr(IntPtr data);
+    [DllImport(CF)] private static extern IntPtr CFStringCreateWithCString(IntPtr alloc, string str, uint encoding);
 
-    [DllImport("/System/Library/Frameworks/Security.framework/Security")]
-    private static extern int SecKeychainItemFreeContent(IntPtr attrList, IntPtr data);
+    [DllImport(Sec)] private static extern int SecItemCopyMatching(IntPtr query, out IntPtr result);
+    [DllImport(Sec)] private static extern int SecItemAdd(IntPtr attrs, IntPtr result);
+    [DllImport(Sec)] private static extern int SecItemUpdate(IntPtr query, IntPtr attrs);
+    [DllImport(Sec)] private static extern int SecItemDelete(IntPtr query);
+
+    // ── Security constants (loaded at runtime from Security.framework) ────────
+
+    private static IntPtr Load(string symbol)
+    {
+        IntPtr lib = dlopen(Sec, 1);
+        IntPtr sym = dlsym(lib, symbol);
+        return Marshal.ReadIntPtr(sym);
+    }
+
+    [DllImport("libdl.dylib")] private static extern IntPtr dlopen(string path, int mode);
+    [DllImport("libdl.dylib")] private static extern IntPtr dlsym(IntPtr handle, string symbol);
+
+    private static readonly IntPtr kSecClass                = Load("kSecClass");
+    private static readonly IntPtr kSecClassGenericPassword = Load("kSecClassGenericPassword");
+    private static readonly IntPtr kSecAttrService          = Load("kSecAttrService");
+    private static readonly IntPtr kSecAttrAccount          = Load("kSecAttrAccount");
+    private static readonly IntPtr kSecReturnData           = Load("kSecReturnData");
+    private static readonly IntPtr kSecValueData            = Load("kSecValueData");
+    private static readonly IntPtr kSecMatchLimit           = Load("kSecMatchLimit");
+    private static readonly IntPtr kSecMatchLimitOne        = Load("kSecMatchLimitOne");
+    private static readonly IntPtr kCFBooleanTrue           = LoadCF("kCFBooleanTrue");
+
+    private static IntPtr LoadCF(string symbol)
+    {
+        IntPtr lib = dlopen(CF, 1);
+        IntPtr sym = dlsym(lib, symbol);
+        return Marshal.ReadIntPtr(sym);
+    }
 }

@@ -13,10 +13,11 @@ namespace Ses.Local.Tray;
 
 public partial class TrayApp : Application
 {
-    private MainWindow?     _mainWindow;
+    private MainWindow?       _mainWindow;
     private IServiceProvider? _services;
-    private NativeMenuItem? _statusItem;
-    private DispatcherTimer? _statusTimer;
+    private NativeMenuItem?   _statusItem;
+    private NativeMenuItem?   _signInItem;
+    private DispatcherTimer?  _statusTimer;
 
     public static readonly DotColorConverter DotColorConverterInstance = new();
 
@@ -37,10 +38,13 @@ public partial class TrayApp : Application
 
             var menu = new NativeMenu();
 
-            // Status line (non-interactive, updated periodically)
-            _statusItem = new NativeMenuItem("● Connecting...") { IsEnabled = false };
+            _statusItem = new NativeMenuItem("○ Not connected") { IsEnabled = false };
             menu.Items.Add(_statusItem);
             menu.Items.Add(new NativeMenuItemSeparator());
+
+            _signInItem = new NativeMenuItem("Sign In...");
+            _signInItem.Click += OnSignInClicked;
+            menu.Items.Add(_signInItem);
 
             var openItem = new NativeMenuItem("Open ses-local");
             openItem.Click += (_, _) => ShowWindow();
@@ -55,7 +59,6 @@ public partial class TrayApp : Application
             trayIcon.Menu = menu;
             SetValue(TrayIcon.IconsProperty, new TrayIcons { trayIcon });
 
-            // Poll status every 5 seconds
             _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
             _statusTimer.Tick += async (_, _) => await UpdateStatusAsync();
             _statusTimer.Start();
@@ -67,7 +70,6 @@ public partial class TrayApp : Application
     public void SetServiceProvider(IServiceProvider services)
     {
         _services = services;
-        // Update immediately once services are available
         Dispatcher.UIThread.InvokeAsync(UpdateStatusAsync);
     }
 
@@ -78,16 +80,37 @@ public partial class TrayApp : Application
         {
             var auth  = _services.GetRequiredService<IAuthService>();
             var state = await auth.GetStateAsync();
-            _statusItem.Header = state.IsAuthenticated
-                ? "● Connected"
-                : state.NeedsReauth
-                    ? "⚠ Sign in required"
-                    : "○ Not connected";
+
+            if (state.IsAuthenticated)
+            {
+                _statusItem.Header      = "● Connected";
+                _signInItem!.IsVisible  = false;
+            }
+            else if (state.NeedsReauth)
+            {
+                _statusItem.Header      = "⚠ Session expired";
+                _signInItem!.Header     = "Sign In Again...";
+                _signInItem!.IsVisible  = true;
+            }
+            else
+            {
+                _statusItem.Header      = "○ Not signed in";
+                _signInItem!.Header     = "Sign In...";
+                _signInItem!.IsVisible  = true;
+            }
         }
         catch
         {
-            _statusItem.Header = "○ Not connected";
+            _statusItem.Header     = "○ Not connected";
+            _signInItem!.IsVisible = true;
         }
+    }
+
+    private async void OnSignInClicked(object? sender, EventArgs e)
+    {
+        if (_services is null) return;
+        var auth = _services.GetRequiredService<IAuthService>();
+        await auth.TriggerReauthAsync();
     }
 
     private void OnTrayIconClicked(object? sender, EventArgs e) => ShowWindow();

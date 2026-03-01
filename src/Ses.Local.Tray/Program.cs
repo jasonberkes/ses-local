@@ -1,6 +1,7 @@
 using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Ses.Local.Core.Interfaces;
 using Ses.Local.Workers;
 using Ses.Local.Workers.Workers;
 
@@ -36,6 +37,11 @@ internal static class Program
             .Build();
 
         await host.StartAsync();
+
+        var auth = host.Services.GetRequiredService<IAuthService>();
+        var state = await auth.GetStateAsync();
+        if (!state.IsAuthenticated)
+            await auth.TriggerReauthAsync();
 
         var app = BuildAvaloniaApp();
         if (app.Instance is TrayApp trayApp)

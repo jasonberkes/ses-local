@@ -24,9 +24,14 @@ public sealed class ClaudeCodeWatcher : BackgroundService
     private readonly ILogger<ClaudeCodeWatcher> _logger;
     private readonly SesLocalOptions _options;
 
-    // Tracks byte offset read per file to enable incremental parsing
+    // Tracks byte offset read per file to enable incremental parsing.
+    // Persisted to disk so restarts resume from the correct position.
     private readonly Dictionary<string, long> _filePositions = new();
     private readonly List<FileSystemWatcher> _watchers = [];
+
+    private static readonly string PositionsFilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".ses", "watcher-positions.json");
 
     public ClaudeCodeWatcher(
         ILocalDbService db,
@@ -54,6 +59,12 @@ public sealed class ClaudeCodeWatcher : BackgroundService
         }
 
         _logger.LogInformation("ClaudeCodeWatcher starting. Watching: {Path}", projectsRoot);
+
+        // Load persisted positions so restarts resume from the correct offset
+        LoadPositions();
+
+        // Brief delay to allow DI/DB to fully initialize before first scan
+        await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
 
         // Do an initial scan of all existing files
         await ScanAllAsync(projectsRoot, stoppingToken);
@@ -203,8 +214,9 @@ public sealed class ClaudeCodeWatcher : BackgroundService
             }
         }
 
-        // Save new position
+        // Save new position and persist to disk
         _filePositions[filePath] = stream.Position;
+        SavePositions();
 
         if (session is null || newMessages.Count == 0) return;
 
@@ -218,6 +230,39 @@ public sealed class ClaudeCodeWatcher : BackgroundService
         await _db.UpsertMessagesAsync(newMessages, ct);
 
         _logger.LogDebug("Processed {Count} new messages from {File}", newMessages.Count, filePath);
+    }
+
+    // ── Position Persistence ──────────────────────────────────────────────────
+
+    private void LoadPositions()
+    {
+        try
+        {
+            if (!File.Exists(PositionsFilePath)) return;
+            var json = File.ReadAllText(PositionsFilePath);
+            var loaded = JsonSerializer.Deserialize<Dictionary<string, long>>(json);
+            if (loaded is null) return;
+            foreach (var (k, v) in loaded)
+                _filePositions[k] = v;
+            _logger.LogInformation("Loaded {Count} file positions from disk", loaded.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load watcher positions — starting from 0");
+        }
+    }
+
+    private void SavePositions()
+    {
+        try
+        {
+            var json = JsonSerializer.Serialize(_filePositions);
+            File.WriteAllText(PositionsFilePath, json);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to save watcher positions");
+        }
     }
 
     // ── Parsing helpers ───────────────────────────────────────────────────────
