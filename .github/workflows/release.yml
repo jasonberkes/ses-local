@@ -120,7 +120,7 @@ jobs:
           PLIST
 
           # Free up disk space before creating DMG
-          rm -rf ./publish
+          rm -rf "./publish/${{ matrix.rid }}"
 
           hdiutil create \
             -volname "ses-local Installer" \
@@ -129,6 +129,7 @@ jobs:
             "./ses-local-installer.dmg"
 
       - name: Upload artifact
+        if: matrix.rid == 'win-x64'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.rid }}
