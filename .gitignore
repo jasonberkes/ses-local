@@ -353,3 +353,4 @@ FodyWeavers.xsd
 # ses-local specific
 .ses/
 *.ses-install-token
+.claude/worktrees/
