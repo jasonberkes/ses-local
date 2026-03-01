@@ -15,7 +15,7 @@ internal static class SubagentStopHandler
         if (string.IsNullOrWhiteSpace(json)) return;
 
         Dictionary<string, object>? input;
-        try { input = JsonSerializer.Deserialize<Dictionary<string, object>>(json); }
+        try { input = JsonSerializer.Deserialize(json, HooksJsonContext.Default.DictionaryStringObject); }
         catch { return; }
         if (input is null) return;
 

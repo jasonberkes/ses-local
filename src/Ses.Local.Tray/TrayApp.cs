@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Tray.Converters;
@@ -12,8 +13,10 @@ namespace Ses.Local.Tray;
 
 public partial class TrayApp : Application
 {
-    private MainWindow? _mainWindow;
+    private MainWindow?     _mainWindow;
     private IServiceProvider? _services;
+    private NativeMenuItem? _statusItem;
+    private DispatcherTimer? _statusTimer;
 
     public static readonly DotColorConverter DotColorConverterInstance = new();
 
@@ -23,10 +26,8 @@ public partial class TrayApp : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            // Don't show main window on startup — tray icon controls visibility
             desktop.MainWindow = null;
 
-            // Build tray icon
             var trayIcon = new TrayIcon
             {
                 Icon        = TryGetTrayIcon(),
@@ -35,23 +36,59 @@ public partial class TrayApp : Application
             trayIcon.Clicked += OnTrayIconClicked;
 
             var menu = new NativeMenu();
-            var showItem = new NativeMenuItem("Open ses-local");
-            showItem.Click += (_, _) => ShowWindow();
+
+            // Status line (non-interactive, updated periodically)
+            _statusItem = new NativeMenuItem("● Connecting...") { IsEnabled = false };
+            menu.Items.Add(_statusItem);
+            menu.Items.Add(new NativeMenuItemSeparator());
+
+            var openItem = new NativeMenuItem("Open ses-local");
+            openItem.Click += (_, _) => ShowWindow();
+            menu.Items.Add(openItem);
+
+            menu.Items.Add(new NativeMenuItemSeparator());
+
             var quitItem = new NativeMenuItem("Quit");
             quitItem.Click += (_, _) => desktop.Shutdown();
-            menu.Items.Add(showItem);
-            menu.Items.Add(new NativeMenuItemSeparator());
             menu.Items.Add(quitItem);
-            trayIcon.Menu = menu;
 
-            var icons = new TrayIcons { trayIcon };
-            SetValue(TrayIcon.IconsProperty, icons);
+            trayIcon.Menu = menu;
+            SetValue(TrayIcon.IconsProperty, new TrayIcons { trayIcon });
+
+            // Poll status every 5 seconds
+            _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+            _statusTimer.Tick += async (_, _) => await UpdateStatusAsync();
+            _statusTimer.Start();
         }
 
         base.OnFrameworkInitializationCompleted();
     }
 
-    public void SetServiceProvider(IServiceProvider services) => _services = services;
+    public void SetServiceProvider(IServiceProvider services)
+    {
+        _services = services;
+        // Update immediately once services are available
+        Dispatcher.UIThread.InvokeAsync(UpdateStatusAsync);
+    }
+
+    private async Task UpdateStatusAsync()
+    {
+        if (_statusItem is null || _services is null) return;
+        try
+        {
+            var auth  = _services.GetRequiredService<IAuthService>();
+            var state = await auth.GetStateAsync();
+            _statusItem.Header = state.IsAuthenticated
+                ? "● Connected"
+                : state.NeedsReauth
+                    ? "⚠ Sign in required"
+                    : "○ Not connected";
+        }
+        catch
+        {
+            _statusItem.Header = "○ Not connected";
+        }
+    }
 
     private void OnTrayIconClicked(object? sender, EventArgs e) => ShowWindow();
 
@@ -76,17 +113,16 @@ public partial class TrayApp : Application
     {
         try
         {
-            var assembly = typeof(TrayApp).Assembly;
+            var assembly     = typeof(TrayApp).Assembly;
             var resourceName = assembly.GetManifestResourceNames()
                 .FirstOrDefault(n => n.EndsWith("tray-icon.png"));
-
             if (resourceName is not null)
             {
                 using var stream = assembly.GetManifestResourceStream(resourceName)!;
                 return new WindowIcon(stream);
             }
         }
-        catch { /* icon load failed — run without icon */ }
+        catch { /* run without icon */ }
         return null;
     }
 }

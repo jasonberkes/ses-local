@@ -44,7 +44,7 @@ internal static class SessionStartHandler
             ["additionalContext"] = sb.ToString()
         };
 
-        Console.WriteLine(JsonSerializer.Serialize(output));
+        Console.WriteLine(JsonSerializer.Serialize(output, HooksJsonContext.Default.DictionaryStringString));
     }
 
     private static string BuildQuery(string cwd)
@@ -62,7 +62,7 @@ internal static class SessionStartHandler
         {
             var json = await Console.In.ReadToEndAsync();
             if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, object>();
-            return JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+            return JsonSerializer.Deserialize(json, HooksJsonContext.Default.DictionaryStringObject);
         }
         catch { return null; }
     }

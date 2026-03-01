@@ -4,6 +4,9 @@
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <CFBundleIdentifier>com.supereasysoftware.ses-local</CFBundleIdentifier>
+    <NSPrincipalClass>NSApplication</NSPrincipalClass>
+    <LSUIElement>true</LSUIElement>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\tray-icon.png" />

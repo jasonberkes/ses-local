@@ -21,7 +21,7 @@ internal static class UserPromptSubmitHandler
         if (string.IsNullOrWhiteSpace(json)) { Console.WriteLine("{}"); return; }
 
         Dictionary<string, object>? input;
-        try { input = JsonSerializer.Deserialize<Dictionary<string, object>>(json); }
+        try { input = JsonSerializer.Deserialize(json, HooksJsonContext.Default.DictionaryStringObject); }
         catch { Console.WriteLine("{}"); return; }
 
         if (input is null) { Console.WriteLine("{}"); return; }
@@ -54,6 +54,6 @@ internal static class UserPromptSubmitHandler
         {
             ["additionalContext"] = sb.ToString()
         };
-        Console.WriteLine(JsonSerializer.Serialize(output));
+        Console.WriteLine(JsonSerializer.Serialize(output, HooksJsonContext.Default.DictionaryStringString));
     }
 }

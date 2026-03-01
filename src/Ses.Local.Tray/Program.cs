@@ -11,6 +11,14 @@ internal static class Program
     [STAThread]
     public static async Task Main(string[] args)
     {
+        // Single-instance enforcement via named mutex
+        using var mutex = new Mutex(true, "com.supereasysoftware.ses-local", out var isNewInstance);
+        if (!isNewInstance)
+        {
+            Console.Error.WriteLine("ses-local is already running.");
+            return;
+        }
+
         var host = Host.CreateDefaultBuilder(args)
             .ConfigureServices((ctx, services) =>
             {
