@@ -220,10 +220,8 @@ jobs:
 
       - name: Stage binaries
         run: |
-          cp ./artifacts/osx-arm64/ses-local ./ses-local-osx-arm64
-          cp ./artifacts/osx-x64/ses-local ./ses-local-osx-x64
+          cp ./artifacts/osx-arm64-dmg/ses-local-installer.dmg ./ses-local-osx-arm64.dmg
           cp ./artifacts/win-x64/ses-local.exe ./ses-local-win-x64.exe
-          chmod +x ./ses-local-osx-arm64 ./ses-local-osx-x64
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -234,6 +232,5 @@ jobs:
           generate_release_notes: true
           prerelease: true
           files: |
-            ses-local-osx-arm64
-            ses-local-osx-x64
+            ses-local-osx-arm64.dmg
             ses-local-win-x64.exe
