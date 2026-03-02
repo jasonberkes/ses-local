@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Ses.Local.Core.Enums;
+using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Options;
 using Ses.Local.Integration.Tests.Fixtures;
 using Ses.Local.Workers.Workers;
@@ -30,8 +32,14 @@ public sealed class ClaudeCodeWatcherIntegrationTests : IAsyncDisposable
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private ClaudeCodeWatcher BuildWatcher() =>
-        new(_dbFixture.Db, NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+    private ClaudeCodeWatcher BuildWatcher()
+    {
+        var claudeMdGenerator = new Mock<IClaudeMdGenerator>();
+        claudeMdGenerator.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        return new ClaudeCodeWatcher(_dbFixture.Db, claudeMdGenerator.Object,
+            NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+    }
 
     /// <summary>Writes JSONL to a temp file and invokes ProcessFileAsync via reflection.</summary>
     private async Task ProcessJsonlAsync(ClaudeCodeWatcher watcher, string filePath)
