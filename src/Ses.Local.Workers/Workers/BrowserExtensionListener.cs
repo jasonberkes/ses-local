@@ -99,6 +99,13 @@ public sealed class BrowserExtensionListener : BackgroundService
                 return;
             }
 
+            // RFC 8252 §7.3 loopback redirect — OAuth callback from identity server
+            if (req.HttpMethod == "GET" && req.Url?.AbsolutePath == "/auth/callback")
+            {
+                await HandleAuthCallbackAsync(req, resp, ct);
+                return;
+            }
+
             // Only accept POST /api/sync/conversations
             if (req.HttpMethod != "POST" || req.Url?.AbsolutePath != "/api/sync/conversations")
             {
@@ -194,6 +201,76 @@ public sealed class BrowserExtensionListener : BackgroundService
         var key   = $"{conv.Uuid}:{conv.UpdatedAt:O}:{conv.Messages?.Count ?? 0}";
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(key));
         return Convert.ToHexString(bytes)[..16];
+    }
+
+    /// <summary>
+    /// Handles the OAuth loopback redirect from the identity server.
+    /// Per RFC 8252 §7.3, the identity server redirects to http://localhost:{port}/auth/callback
+    /// with refresh and access tokens as query parameters.
+    /// </summary>
+    private async Task HandleAuthCallbackAsync(HttpListenerRequest req, HttpListenerResponse resp, CancellationToken ct)
+    {
+        try
+        {
+            var query = req.QueryString;
+            var refresh = query["refresh"];
+            var access  = query["access"];
+
+            if (string.IsNullOrEmpty(refresh) || string.IsNullOrEmpty(access))
+            {
+                _logger.LogWarning("Auth callback missing required tokens");
+                resp.StatusCode = 400;
+                await WriteHtmlAsync(resp, "Authentication Failed",
+                    "Missing required tokens. Please try signing in again.",
+                    "https://identity.tm.supereasysoftware.com/api/v1/install/login?reauth=true");
+                return;
+            }
+
+            await _auth.HandleAuthCallbackAsync(refresh, access, ct);
+            _logger.LogInformation("OAuth loopback callback handled — tokens stored");
+
+            resp.StatusCode = 200;
+            await WriteHtmlAsync(resp, "Authentication Successful",
+                "You are now signed in to ses-local. You can close this tab.",
+                retryLink: null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to handle auth callback");
+            resp.StatusCode = 500;
+            await WriteHtmlAsync(resp, "Authentication Error",
+                "Something went wrong. Please try again.",
+                "https://identity.tm.supereasysoftware.com/api/v1/install/login?reauth=true");
+        }
+    }
+
+    private static async Task WriteHtmlAsync(HttpListenerResponse resp, string title, string message, string? retryLink)
+    {
+        var encodedTitle   = System.Net.WebUtility.HtmlEncode(title);
+        var encodedMessage = System.Net.WebUtility.HtmlEncode(message);
+        var headingColor   = resp.StatusCode == 200 ? "#2e7d32" : "#c62828";
+        var retryHtml      = retryLink is not null
+            ? "<a href=\"" + System.Net.WebUtility.HtmlEncode(retryLink) + "\" style=\"color:#1a73e8;text-decoration:none;\">Try again</a>"
+            : "";
+
+        var html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"/>"
+            + "<title>" + encodedTitle + "</title>"
+            + "<style>"
+            + "body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}"
+            + ".card{background:#fff;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:40px;max-width:400px;text-align:center}"
+            + "h2{color:" + headingColor + ";margin-bottom:12px}"
+            + "p{color:#555;margin-bottom:24px}"
+            + "</style></head><body><div class=\"card\">"
+            + "<h2>" + encodedTitle + "</h2>"
+            + "<p>" + encodedMessage + "</p>"
+            + retryHtml
+            + "</div></body></html>";
+
+        resp.ContentType = "text/html; charset=utf-8";
+        var bytes = Encoding.UTF8.GetBytes(html);
+        resp.ContentLength64 = bytes.Length;
+        await resp.OutputStream.WriteAsync(bytes);
+        resp.Close();
     }
 
     private static async Task WriteJsonAsync(HttpListenerResponse resp, object data)
