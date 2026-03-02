@@ -15,9 +15,9 @@ internal static class UserPromptSubmitHandler
     private const int CharsPerToken    = 4; // rough estimate
     private const int MaxChars         = MaxTokenBudget * CharsPerToken;
 
-    internal static async Task RunAsync()
+    internal static async Task RunAsync(CancellationToken ct = default)
     {
-        var json  = await Console.In.ReadToEndAsync();
+        var json  = await Console.In.ReadToEndAsync(ct);
         if (string.IsNullOrWhiteSpace(json)) { Console.WriteLine("{}"); return; }
 
         Dictionary<string, object>? input;
@@ -31,8 +31,8 @@ internal static class UserPromptSubmitHandler
 
         if (string.IsNullOrWhiteSpace(prompt)) { Console.WriteLine("{}"); return; }
 
-        using var ctx = await HookContext.CreateAsync();
-        var results   = await ctx.SearchMemoryAsync(prompt, limit: 5);
+        using var ctx = await HookContext.CreateAsync(ct);
+        var results   = await ctx.SearchMemoryAsync(prompt, limit: 5, ct: ct);
 
         // Filter to high-confidence results only (score > 0.6)
         var relevant = results.Where(r => r.Score > 0.6).Take(3).ToList();

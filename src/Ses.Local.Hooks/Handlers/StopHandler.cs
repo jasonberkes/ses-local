@@ -9,9 +9,9 @@ namespace Ses.Local.Hooks.Handlers;
 /// </summary>
 internal static class StopHandler
 {
-    internal static async Task RunAsync()
+    internal static async Task RunAsync(CancellationToken ct = default)
     {
-        var json = await Console.In.ReadToEndAsync();
+        var json = await Console.In.ReadToEndAsync(ct);
         if (string.IsNullOrWhiteSpace(json)) return;
 
         Dictionary<string, object>? input;
@@ -24,13 +24,13 @@ internal static class StopHandler
 
         if (string.IsNullOrWhiteSpace(sessionId)) return;
 
-        using var ctx = await HookContext.CreateAsync();
+        using var ctx = await HookContext.CreateAsync(ct);
 
         // Store a session-end marker observation
         var summary = $"Session ended after {numTurns} turns (session: {sessionId})";
-        await ctx.SaveObservationAsync(sessionId, summary, "session_stop", importance: 0.6);
+        await ctx.SaveObservationAsync(sessionId, summary, "session_stop", importance: 0.6, ct: ct);
 
         // Also call SaveSummary to trigger cloud sync
-        await ctx.SaveSummaryAsync(sessionId, summary);
+        await ctx.SaveSummaryAsync(sessionId, summary, ct);
     }
 }
