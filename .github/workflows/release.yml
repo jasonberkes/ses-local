@@ -55,12 +55,8 @@ jobs:
         include:
           - rid: osx-arm64
             os: macos-latest
-            src: Ses.Local.Tray
-            binary: ses-local
           - rid: win-x64
             os: windows-latest
-            src: Ses.Local.Tray.exe
-            binary: ses-local.exe
     steps:
       - uses: actions/checkout@v4
 
@@ -77,7 +73,17 @@ jobs:
             --store-password-in-clear-text \
             --configfile nuget.config
 
-      - name: Publish
+      - name: Publish Daemon
+        shell: bash
+        run: |
+          dotnet publish src/Ses.Local.Daemon/Ses.Local.Daemon.csproj \
+            --configuration Release \
+            --runtime ${{ matrix.rid }} \
+            -p:PublishSingleFile=true \
+            -p:SelfContained=true \
+            --output ./publish-daemon/${{ matrix.rid }}
+
+      - name: Publish Tray
         shell: bash
         run: |
           dotnet publish src/Ses.Local.Tray/Ses.Local.Tray.csproj \
@@ -85,23 +91,35 @@ jobs:
             --runtime ${{ matrix.rid }} \
             -p:PublishSingleFile=true \
             -p:SelfContained=true \
-            --output ./publish/${{ matrix.rid }}
+            --output ./publish-tray/${{ matrix.rid }}
 
-      - name: Rename binary
+      - name: Rename binaries (macOS)
+        if: startsWith(matrix.rid, 'osx-')
         shell: bash
-        run: mv ./publish/${{ matrix.rid }}/${{ matrix.src }} ./publish/${{ matrix.rid }}/${{ matrix.binary }}
+        run: |
+          mv ./publish-daemon/${{ matrix.rid }}/ses-local-daemon ./publish-daemon/${{ matrix.rid }}/ses-local-daemon
+          mv ./publish-tray/${{ matrix.rid }}/Ses.Local.Tray ./publish-tray/${{ matrix.rid }}/ses-local
+
+      - name: Rename binaries (Windows)
+        if: matrix.rid == 'win-x64'
+        shell: bash
+        run: |
+          mv ./publish-daemon/${{ matrix.rid }}/ses-local-daemon.exe ./publish-daemon/${{ matrix.rid }}/ses-local-daemon.exe
+          mv ./publish-tray/${{ matrix.rid }}/Ses.Local.Tray.exe ./publish-tray/${{ matrix.rid }}/ses-local.exe
 
       - name: Package DMG (macOS only)
         if: startsWith(matrix.rid, 'osx-')
         shell: bash
         run: |
-          BINARY="./publish/${{ matrix.rid }}/ses-local"
-          chmod +x "$BINARY"
+          DAEMON="./publish-daemon/${{ matrix.rid }}/ses-local-daemon"
+          TRAY="./publish-tray/${{ matrix.rid }}/ses-local"
+          chmod +x "$DAEMON" "$TRAY"
 
-          # Build .app bundle
+          # Build .app bundle with both binaries
           APP="./ses-local-installer.app"
           mkdir -p "$APP/Contents/MacOS"
-          cp "$BINARY" "$APP/Contents/MacOS/ses-local-installer"
+          cp "$DAEMON" "$APP/Contents/MacOS/ses-local-daemon"
+          cp "$TRAY" "$APP/Contents/MacOS/ses-local-installer"
 
           printf '%s\n' \
             '<?xml version="1.0" encoding="UTF-8"?>' \
@@ -118,7 +136,7 @@ jobs:
             > "$APP/Contents/Info.plist"
 
           # Free up disk space before creating DMG
-          rm -rf "./publish/${{ matrix.rid }}"
+          rm -rf "./publish-daemon/${{ matrix.rid }}" "./publish-tray/${{ matrix.rid }}"
 
           hdiutil create \
             -volname "ses-local Installer" \
@@ -126,12 +144,14 @@ jobs:
             -ov -format UDZO \
             "./ses-local-installer.dmg"
 
-      - name: Upload artifact
+      - name: Upload artifact (Windows)
         if: matrix.rid == 'win-x64'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.rid }}
-          path: ./publish/${{ matrix.rid }}/${{ matrix.binary }}
+          path: |
+            ./publish-daemon/${{ matrix.rid }}/ses-local-daemon.exe
+            ./publish-tray/${{ matrix.rid }}/ses-local.exe
           if-no-files-found: error
 
       - name: Upload DMG artifact (macOS only)
@@ -173,6 +193,12 @@ jobs:
           az storage blob upload \
             --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
             --container-name artifacts \
+            --name "ses-local/$V/ses-local-daemon-win-x64.exe" \
+            --file ./artifacts/win-x64/ses-local-daemon.exe \
+            --overwrite
+          az storage blob upload \
+            --connection-string "${{ secrets.BLOB_CONNECTION_STRING }}" \
+            --container-name artifacts \
             --name "ses-local/$V/ses-local-win-x64.exe" \
             --file ./artifacts/win-x64/ses-local.exe \
             --overwrite
@@ -187,7 +213,8 @@ jobs:
             "published": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "binaries": {
               "osx-arm64": "$BASE/$V/ses-local-osx-arm64.dmg",
-              "win-x64":   "$BASE/$V/ses-local-win-x64.exe"
+              "win-x64-daemon": "$BASE/$V/ses-local-daemon-win-x64.exe",
+              "win-x64-tray":   "$BASE/$V/ses-local-win-x64.exe"
             }
           }
           EOF
@@ -222,6 +249,7 @@ jobs:
       - name: Stage binaries
         run: |
           cp ./artifacts/osx-arm64-dmg/ses-local-installer.dmg ./ses-local-osx-arm64.dmg
+          cp ./artifacts/win-x64/ses-local-daemon.exe ./ses-local-daemon-win-x64.exe
           cp ./artifacts/win-x64/ses-local.exe ./ses-local-win-x64.exe
 
       - name: Create GitHub Release
@@ -234,4 +262,5 @@ jobs:
           prerelease: true
           files: |
             ses-local-osx-arm64.dmg
+            ses-local-daemon-win-x64.exe
             ses-local-win-x64.exe
