@@ -22,12 +22,13 @@ public sealed class ClaudeAiClient : IDisposable
     {
         _http   = http;
         _logger = logger;
+        var referer = _http.BaseAddress?.AbsoluteUri ?? "https://claude.ai/";
         // Set the cookie in both possible formats
         _http.DefaultRequestHeaders.Add("Cookie",
             $"sessionKey={sessionCookie}; __Host-next-auth.session-token={sessionCookie}");
         _http.DefaultRequestHeaders.Add("User-Agent",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-        _http.DefaultRequestHeaders.Add("Referer", "https://claude.ai/");
+        _http.DefaultRequestHeaders.Add("Referer", referer);
     }
 
     public async Task<string?> GetOrgIdAsync(CancellationToken ct = default)

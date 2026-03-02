@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Ses.Local.Core.Interfaces;
+using Ses.Local.Core.Options;
 using Ses.Local.Workers.Services;
 using Xunit;
 
@@ -42,7 +44,8 @@ public sealed class ClaudeApiClientTests
         var factory   = BuildNoOpFactory();
         var extractor = new ClaudeSessionCookieExtractor(NullLogger<ClaudeSessionCookieExtractor>.Instance);
         var db        = new Mock<ILocalDbService>();
-        var svc       = new ClaudeAiSyncService(factory, extractor, db.Object, NullLogger<ClaudeAiSyncService>.Instance);
+        var svc       = new ClaudeAiSyncService(factory, extractor, db.Object,
+            NullLogger<ClaudeAiSyncService>.Instance, Options.Create(new SesLocalOptions()));
 
         var ex = await Record.ExceptionAsync(() => svc.SyncAsync());
         Assert.Null(ex);
@@ -54,7 +57,8 @@ public sealed class ClaudeApiClientTests
         var factory   = BuildNoOpFactory();
         var extractor = new ClaudeSessionCookieExtractor(NullLogger<ClaudeSessionCookieExtractor>.Instance);
         var db        = new Mock<ILocalDbService>();
-        var svc       = new ClaudeAiSyncService(factory, extractor, db.Object, NullLogger<ClaudeAiSyncService>.Instance);
+        var svc       = new ClaudeAiSyncService(factory, extractor, db.Object,
+            NullLogger<ClaudeAiSyncService>.Instance, Options.Create(new SesLocalOptions()));
 
         var uuids = new[] { "uuid-1", "uuid-2" };
         var ex    = await Record.ExceptionAsync(() => svc.SyncAsync(uuids));

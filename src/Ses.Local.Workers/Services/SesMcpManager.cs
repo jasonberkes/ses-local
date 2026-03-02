@@ -1,8 +1,10 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 
 namespace Ses.Local.Workers.Services;
 
@@ -28,25 +30,29 @@ public sealed class SesMcpManager
     private readonly SesMcpUpdater _updater;
     private readonly IAuthService _auth;
     private readonly ILogger<SesMcpManager> _logger;
+    private readonly string _cloudMcpUrl;
+    private readonly string _sesMcpManifestUrl;
 
     private const string SesLocalMcpKey = "ses-local";
     private const string SesCloudMcpKey = "ses-cloud";
-    private const string CloudMcpUrl = "https://mcp.tm.supereasysoftware.com/mcp";
     private static readonly string[] SesLocalArgs = ["--transport", "stdio", "--skip-update"];
-    private static readonly string[] SesCloudArgs = ["-y", "@anthropic-ai/mcp-proxy", CloudMcpUrl];
+    private string[] SesCloudArgs => ["-y", "@anthropic-ai/mcp-proxy", _cloudMcpUrl];
 
     public SesMcpManager(
         IHttpClientFactory httpClientFactory,
         ICredentialStore keychain,
         SesMcpUpdater updater,
         IAuthService auth,
-        ILogger<SesMcpManager> logger)
+        ILogger<SesMcpManager> logger,
+        IOptions<SesLocalOptions> options)
     {
         _httpClientFactory = httpClientFactory;
         _keychain          = keychain;
         _updater           = updater;
         _auth              = auth;
         _logger            = logger;
+        _cloudMcpUrl       = options.Value.CloudMcpUrl;
+        _sesMcpManifestUrl = options.Value.SesMcpManifestUrl;
     }
 
     public async Task<SesMcpHealthStatus> CheckAndRepairAsync(CancellationToken ct = default)
@@ -137,8 +143,7 @@ public sealed class SesMcpManager
         try
         {
             var http = _httpClientFactory.CreateClient(DependencyInjection.SesMcpInstallClientName);
-            var json = await http.GetStringAsync(
-                "https://tmprodeus2data.blob.core.windows.net/artifacts/ses-mcp/latest.json", ct);
+            var json = await http.GetStringAsync(_sesMcpManifestUrl, ct);
             return JsonSerializer.Deserialize(json, UpdateManifestJsonContext.Default.UpdateManifest);
         }
         catch { return null; }

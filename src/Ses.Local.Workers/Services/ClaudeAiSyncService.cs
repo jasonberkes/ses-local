@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Enums;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 
 namespace Ses.Local.Workers.Services;
 
@@ -26,12 +28,15 @@ public sealed class ClaudeAiSyncService
         IHttpClientFactory httpClientFactory,
         ClaudeSessionCookieExtractor cookieExtractor,
         ILocalDbService db,
-        ILogger<ClaudeAiSyncService> logger)
+        ILogger<ClaudeAiSyncService> logger,
+        IOptions<SesLocalOptions> options)
     {
         _httpClientFactory = httpClientFactory;
         _cookieExtractor   = cookieExtractor;
         _db                = db;
         _logger            = logger;
+        // options used by DI infrastructure (URL baked into the named HttpClient)
+        _ = options;
     }
 
     /// <summary>

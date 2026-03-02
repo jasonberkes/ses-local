@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Options;
 using Ses.Local.Workers.Services;
@@ -21,11 +22,13 @@ public static class DependencyInjection
         // SQLite data layer
         services.AddSingleton<ILocalDbService, LocalDbService>();
 
-        // Options
+        // Options — validate all URLs at startup
         if (configuration is not null)
             services.Configure<SesLocalOptions>(configuration.GetSection(SesLocalOptions.SectionName));
         else
             services.Configure<SesLocalOptions>(_ => { });
+        services.AddSingleton<IValidateOptions<SesLocalOptions>, SesLocalOptionsValidator>();
+        services.AddOptions<SesLocalOptions>().ValidateOnStart();
 
         // OS keychain — platform-specific
         if (OperatingSystem.IsMacOS())
@@ -37,10 +40,11 @@ public static class DependencyInjection
         else
             services.AddSingleton<ICredentialStore, InMemoryCredentialStore>(); // Linux/CI
 
-        // Identity HTTP client — 2 retries, 10s total timeout
-        services.AddHttpClient<IdentityClient>(client =>
+        // Identity HTTP client — 2 retries, 10s total timeout, base address from options
+        services.AddHttpClient<IdentityClient>((sp, client) =>
         {
-            client.BaseAddress = new Uri("https://identity.tm.supereasysoftware.com/");
+            var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
+            client.BaseAddress = new Uri(opts.IdentityBaseUrl.TrimEnd('/') + "/");
         })
         .AddStandardResilienceHandler(options =>
         {
@@ -49,14 +53,30 @@ public static class DependencyInjection
             options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(3);
         });
 
+        // License validation HTTP client — uses identity server base URL
+        services.AddHttpClient<LicenseValidationClient>((sp, client) =>
+        {
+            var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
+            client.BaseAddress = new Uri(opts.IdentityBaseUrl.TrimEnd('/') + "/");
+        })
+        .AddStandardResilienceHandler(options =>
+        {
+            options.Retry.MaxRetryAttempts = 2;
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(15);
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(5);
+        });
+
         // Auth service
         services.AddSingleton<IAuthService, AuthService>();
 
-        // DocumentService HTTP client — 3 retries, 30s total timeout
-        services.AddHttpClient(DocumentServiceClientName, client =>
+        // License service
+        services.AddSingleton<ILicenseService, LicenseService>();
+
+        // DocumentService HTTP client — 3 retries, 30s total timeout, URL from options
+        services.AddHttpClient(DocumentServiceClientName, (sp, client) =>
         {
-            client.BaseAddress = new Uri(
-                "https://tm-documentservice-prod-eus2.redhill-040b1667.eastus2.azurecontainerapps.io");
+            var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
+            client.BaseAddress = new Uri(opts.DocumentServiceBaseUrl.TrimEnd('/') + "/");
         })
         .AddStandardResilienceHandler(options =>
         {
@@ -65,10 +85,11 @@ public static class DependencyInjection
             options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(7);
         });
 
-        // CloudMemory HTTP client — 2 retries, 15s total timeout
-        services.AddHttpClient(CloudMemoryClientName, client =>
+        // CloudMemory HTTP client — 2 retries, 15s total timeout, URL from options
+        services.AddHttpClient(CloudMemoryClientName, (sp, client) =>
         {
-            client.BaseAddress = new Uri("https://memory.tm.supereasysoftware.com");
+            var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
+            client.BaseAddress = new Uri(opts.MemoryBaseUrl.TrimEnd('/') + "/");
         })
         .AddStandardResilienceHandler(options =>
         {
@@ -87,9 +108,10 @@ public static class DependencyInjection
 
         // Claude.ai API client + sync service (WI-941)
         // No resilience — uses session cookies and has custom rate limiting
-        services.AddHttpClient(ClaudeAiClient.HttpClientName, client =>
+        services.AddHttpClient(ClaudeAiClient.HttpClientName, (sp, client) =>
         {
-            client.BaseAddress = new Uri("https://claude.ai");
+            var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
+            client.BaseAddress = new Uri(opts.ClaudeAiBaseUrl.TrimEnd('/') + "/");
             client.Timeout     = TimeSpan.FromSeconds(30);
         });
         services.AddSingleton<ClaudeSessionCookieExtractor>();

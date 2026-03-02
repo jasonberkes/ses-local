@@ -1,4 +1,6 @@
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 using Ses.Local.Tray.Services;
 using Xunit;
 
@@ -11,7 +13,7 @@ public sealed class DaemonAuthProxyTests
     {
         // DaemonAuthProxy connects to ~/.ses/daemon.sock — with no daemon running,
         // the socket doesn't exist or is refused. Should return unauthenticated gracefully.
-        using var proxy = new DaemonAuthProxy();
+        using var proxy = new DaemonAuthProxy(Options.Create(new SesLocalOptions()));
 
         var state = await proxy.GetStateAsync();
 
@@ -22,7 +24,7 @@ public sealed class DaemonAuthProxyTests
     [Fact]
     public async Task SignOutAsync_DoesNotThrow_WhenDaemonNotRunning()
     {
-        using var proxy = new DaemonAuthProxy();
+        using var proxy = new DaemonAuthProxy(Options.Create(new SesLocalOptions()));
 
         // Should not throw even though daemon is unreachable
         await proxy.SignOutAsync();
@@ -31,7 +33,7 @@ public sealed class DaemonAuthProxyTests
     [Fact]
     public async Task ShutdownAsync_DoesNotThrow_WhenDaemonNotRunning()
     {
-        using var proxy = new DaemonAuthProxy();
+        using var proxy = new DaemonAuthProxy(Options.Create(new SesLocalOptions()));
 
         // Should not throw even though daemon is unreachable
         await proxy.ShutdownAsync();

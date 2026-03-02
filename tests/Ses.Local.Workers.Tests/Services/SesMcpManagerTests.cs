@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 using Ses.Local.Workers.Services;
 using Xunit;
 
@@ -29,7 +31,7 @@ public sealed class SesMcpManagerTests
         var auth    = new Mock<IAuthService>();
 
         var manager = new SesMcpManager(factory, keychain.Object, updater, auth.Object,
-            NullLogger<SesMcpManager>.Instance);
+            NullLogger<SesMcpManager>.Instance, Options.Create(new SesLocalOptions()));
 
         // Should not throw even if binary missing and network unavailable
         var ex = await Record.ExceptionAsync(() => manager.CheckAndRepairAsync());
@@ -50,7 +52,7 @@ public sealed class SesMcpManagerTests
         var auth    = new Mock<IAuthService>();
 
         var manager = new SesMcpManager(factory, keychain.Object, updater, auth.Object,
-            NullLogger<SesMcpManager>.Instance);
+            NullLogger<SesMcpManager>.Instance, Options.Create(new SesLocalOptions()));
 
         // Should not throw regardless of whether Claude Desktop is installed
         var ex = await Record.ExceptionAsync(() => manager.CheckAndRepairAsync());
@@ -94,7 +96,8 @@ public sealed class SesMcpManagerTests
     {
         var handler = new FakeHttpHandler();
         var http    = new HttpClient(handler);
-        return new SesMcpUpdater(NullLogger<SesMcpUpdater>.Instance, http);
+        return new SesMcpUpdater(NullLogger<SesMcpUpdater>.Instance, http,
+            () => "/nonexistent/path/ses-mcp");
     }
 
     private static IHttpClientFactory BuildFailingFactory()

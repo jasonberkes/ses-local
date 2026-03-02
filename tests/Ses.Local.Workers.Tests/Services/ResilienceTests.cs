@@ -1,8 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 using Ses.Local.Workers;
 using Ses.Local.Workers.Services;
 using Xunit;
@@ -127,7 +129,7 @@ public sealed class ResilienceTests
         var updater = BuildUpdater();
 
         var manager = new SesMcpManager(factory.Object, keychain.Object, updater, auth.Object,
-            NullLogger<SesMcpManager>.Instance);
+            NullLogger<SesMcpManager>.Instance, Options.Create(new SesLocalOptions()));
 
         // Does not throw even when ses-mcp is missing and install fails
         var ex = await Record.ExceptionAsync(() => manager.CheckAndRepairAsync());
@@ -226,7 +228,8 @@ public sealed class ResilienceTests
     private static SesMcpUpdater BuildUpdater()
     {
         var http = new HttpClient(new ServiceUnavailableHandler());
-        return new SesMcpUpdater(NullLogger<SesMcpUpdater>.Instance, http);
+        return new SesMcpUpdater(NullLogger<SesMcpUpdater>.Instance, http,
+            () => "/nonexistent/path/ses-mcp");
     }
 
     private sealed class ServiceUnavailableHandler : HttpMessageHandler

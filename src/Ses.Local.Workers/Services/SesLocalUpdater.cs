@@ -3,7 +3,9 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 
 namespace Ses.Local.Workers.Services;
 
@@ -18,18 +20,21 @@ public sealed class SesLocalUpdater
     private readonly ILogger<SesLocalUpdater> _logger;
     private readonly HttpClient _http;
     private readonly Func<string?> _getBinaryPath;
+    private readonly string _manifestUrl;
 
-    private const string ManifestUrl =
+    private const string DefaultManifestUrl =
         "https://tmprodeus2data.blob.core.windows.net/artifacts/ses-local/latest.json";
 
-    public SesLocalUpdater(ILogger<SesLocalUpdater> logger, HttpClient http)
-        : this(logger, http, () => Environment.ProcessPath) { }
+    public SesLocalUpdater(ILogger<SesLocalUpdater> logger, HttpClient http, IOptions<SesLocalOptions> options)
+        : this(logger, http, () => Environment.ProcessPath, options.Value.SesLocalManifestUrl) { }
 
-    internal SesLocalUpdater(ILogger<SesLocalUpdater> logger, HttpClient http, Func<string?> getBinaryPath)
+    internal SesLocalUpdater(ILogger<SesLocalUpdater> logger, HttpClient http, Func<string?> getBinaryPath,
+        string manifestUrl = DefaultManifestUrl)
     {
         _logger = logger;
         _http = http;
         _getBinaryPath = getBinaryPath;
+        _manifestUrl = manifestUrl;
     }
 
     public async Task<UpdateResult> CheckAndApplyAsync(CancellationToken ct = default)
@@ -72,12 +77,12 @@ public sealed class SesLocalUpdater
     {
         try
         {
-            var json = await _http.GetStringAsync(ManifestUrl, ct);
+            var json = await _http.GetStringAsync(_manifestUrl, ct);
             return JsonSerializer.Deserialize(json, UpdateManifestJsonContext.Default.UpdateManifest);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to fetch ses-local manifest from {Url}", ManifestUrl);
+            _logger.LogWarning(ex, "Failed to fetch ses-local manifest from {Url}", _manifestUrl);
             return null;
         }
     }

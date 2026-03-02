@@ -1,6 +1,8 @@
+using Microsoft.Extensions.Options;
 using Moq;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 using Ses.Local.Tray.ViewModels;
 using Xunit;
 
@@ -14,7 +16,7 @@ public sealed class MainWindowViewModelTests
         var auth = new Mock<IAuthService>();
         auth.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
 
-        var vm = new MainWindowViewModel(auth.Object);
+        var vm = new MainWindowViewModel(auth.Object, Options.Create(new SesLocalOptions()));
 
         Assert.Equal(5, vm.ConvSyncFeatures.Count);
         Assert.Equal(4, vm.MemoryFeatures.Count);
@@ -26,7 +28,7 @@ public sealed class MainWindowViewModelTests
         var auth = new Mock<IAuthService>();
         auth.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
 
-        var vm = new MainWindowViewModel(auth.Object);
+        var vm = new MainWindowViewModel(auth.Object, Options.Create(new SesLocalOptions()));
         var names = vm.ConvSyncFeatures.Select(f => f.Name).ToList();
 
         Assert.Contains("Claude.ai", names);
@@ -42,7 +44,7 @@ public sealed class MainWindowViewModelTests
         var auth = new Mock<IAuthService>();
         auth.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
 
-        var vm = new MainWindowViewModel(auth.Object);
+        var vm = new MainWindowViewModel(auth.Object, Options.Create(new SesLocalOptions()));
         var chatGpt = vm.ConvSyncFeatures.First(f => f.Name == "ChatGPT");
 
         Assert.True(chatGpt.IsComingSoon);
@@ -55,7 +57,7 @@ public sealed class MainWindowViewModelTests
         auth.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
         auth.Setup(x => x.SignOutAsync(default)).Returns(Task.CompletedTask);
 
-        var vm = new MainWindowViewModel(auth.Object);
+        var vm = new MainWindowViewModel(auth.Object, Options.Create(new SesLocalOptions()));
         await vm.SignOutAsync();
 
         auth.Verify(x => x.SignOutAsync(default), Times.Once);
@@ -67,7 +69,7 @@ public sealed class MainWindowViewModelTests
         var auth = new Mock<IAuthService>();
         auth.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
 
-        var vm = new MainWindowViewModel(auth.Object);
+        var vm = new MainWindowViewModel(auth.Object, Options.Create(new SesLocalOptions()));
         var feature = vm.ConvSyncFeatures.First(f => f.Key == "claude_code_sync");
 
         await vm.ToggleFeatureAsync(feature, false);
