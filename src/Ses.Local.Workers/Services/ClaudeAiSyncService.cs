@@ -18,22 +18,25 @@ namespace Ses.Local.Workers.Services;
 /// </summary>
 public sealed class ClaudeAiSyncService
 {
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ClaudeSessionCookieExtractor _cookieExtractor;
     private readonly ILocalDbService _db;
     private readonly ILogger<ClaudeAiSyncService> _logger;
-    private readonly string _claudeAiBaseUrl;
     private bool _initialSyncDone;
 
     public ClaudeAiSyncService(
+        IHttpClientFactory httpClientFactory,
         ClaudeSessionCookieExtractor cookieExtractor,
         ILocalDbService db,
         ILogger<ClaudeAiSyncService> logger,
         IOptions<SesLocalOptions> options)
     {
-        _cookieExtractor = cookieExtractor;
-        _db              = db;
-        _logger          = logger;
-        _claudeAiBaseUrl = options.Value.ClaudeAiBaseUrl;
+        _httpClientFactory = httpClientFactory;
+        _cookieExtractor   = cookieExtractor;
+        _db                = db;
+        _logger            = logger;
+        // options used by DI infrastructure (URL baked into the named HttpClient)
+        _ = options;
     }
 
     /// <summary>
@@ -50,9 +53,9 @@ public sealed class ClaudeAiSyncService
             return;
         }
 
-        using var client = new ClaudeAiClient(cookie,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeAiClient>.Instance,
-            _claudeAiBaseUrl);
+        var http = _httpClientFactory.CreateClient(ClaudeAiClient.HttpClientName);
+        using var client = new ClaudeAiClient(http, cookie,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeAiClient>.Instance);
 
         try
         {

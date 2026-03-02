@@ -3,9 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Ses.Local.Core.Models;
-using Ses.Local.Core.Options;
 
 namespace Ses.Local.Workers.Services;
 
@@ -15,8 +13,8 @@ namespace Ses.Local.Workers.Services;
 /// </summary>
 public sealed class DocumentServiceUploader
 {
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<DocumentServiceUploader> _logger;
-    private readonly string _docServiceUrl;
 
     private const int TranscriptTypeId = 4;
 
@@ -29,10 +27,10 @@ public sealed class DocumentServiceUploader
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public DocumentServiceUploader(ILogger<DocumentServiceUploader> logger, IOptions<SesLocalOptions> options)
+    public DocumentServiceUploader(IHttpClientFactory httpClientFactory, ILogger<DocumentServiceUploader> logger)
     {
-        _logger = logger;
-        _docServiceUrl = options.Value.DocumentServiceBaseUrl;
+        _httpClientFactory = httpClientFactory;
+        _logger            = logger;
     }
 
     /// <summary>
@@ -46,7 +44,9 @@ public sealed class DocumentServiceUploader
     {
         try
         {
-            using var http = BuildHttpClient(pat);
+            var http = _httpClientFactory.CreateClient(DependencyInjection.DocumentServiceClientName);
+            http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", pat);
 
             var transcript = FormatTranscript(session, messages);
             var metadataJson = JsonSerializer.Serialize(new
@@ -113,17 +113,5 @@ public sealed class DocumentServiceUploader
         }
 
         return sb.ToString();
-    }
-
-    private HttpClient BuildHttpClient(string pat)
-    {
-        var http = new HttpClient
-        {
-            BaseAddress = new Uri(_docServiceUrl),
-            Timeout     = TimeSpan.FromSeconds(30)
-        };
-        http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", pat);
-        return http;
     }
 }

@@ -9,7 +9,7 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.3" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
-    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.3" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.3" />
     <!-- Avalonia cross-platform UI -->
     <!-- Avalonia is a NuGet PACKAGE, not a .NET SDK. Latest stable: 11.3.12. Do NOT use 12.x (preview). -->
@@ -17,6 +17,8 @@
     <PackageVersion Include="Avalonia.Desktop" Version="11.3.12" />
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="11.3.12" />
     <PackageVersion Include="Avalonia.Controls.DataGrid" Version="11.3.12" />
+    <!-- Resilience -->
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.3.0" />
     <!-- Auth / HTTP -->
     <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.4.0" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.3" />

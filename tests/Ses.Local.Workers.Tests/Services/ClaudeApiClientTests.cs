@@ -31,7 +31,9 @@ public sealed class ClaudeApiClientTests
     [Fact]
     public async Task ClaudeAiClient_WithInvalidCookie_ReturnsNullOrgId()
     {
-        using var client = new ClaudeAiClient("bad_cookie", NullLogger<ClaudeAiClient>.Instance);
+        var handler = new UnauthorizedHttpHandler();
+        var http    = new HttpClient(handler) { BaseAddress = new Uri("https://claude.ai") };
+        using var client = new ClaudeAiClient(http, "bad_cookie", NullLogger<ClaudeAiClient>.Instance);
         var orgId = await client.GetOrgIdAsync();
         Assert.Null(orgId);
     }
@@ -39,10 +41,11 @@ public sealed class ClaudeApiClientTests
     [Fact]
     public async Task SyncService_WhenNoCookie_CompletesWithoutThrowing()
     {
+        var factory   = BuildNoOpFactory();
         var extractor = new ClaudeSessionCookieExtractor(NullLogger<ClaudeSessionCookieExtractor>.Instance);
         var db        = new Mock<ILocalDbService>();
-        var svc       = new ClaudeAiSyncService(extractor, db.Object, NullLogger<ClaudeAiSyncService>.Instance,
-            Options.Create(new SesLocalOptions()));
+        var svc       = new ClaudeAiSyncService(factory, extractor, db.Object,
+            NullLogger<ClaudeAiSyncService>.Instance, Options.Create(new SesLocalOptions()));
 
         var ex = await Record.ExceptionAsync(() => svc.SyncAsync());
         Assert.Null(ex);
@@ -51,13 +54,31 @@ public sealed class ClaudeApiClientTests
     [Fact]
     public async Task SyncService_WithTargetUuids_WhenNoCookie_CompletesWithoutThrowing()
     {
+        var factory   = BuildNoOpFactory();
         var extractor = new ClaudeSessionCookieExtractor(NullLogger<ClaudeSessionCookieExtractor>.Instance);
         var db        = new Mock<ILocalDbService>();
-        var svc       = new ClaudeAiSyncService(extractor, db.Object, NullLogger<ClaudeAiSyncService>.Instance,
-            Options.Create(new SesLocalOptions()));
+        var svc       = new ClaudeAiSyncService(factory, extractor, db.Object,
+            NullLogger<ClaudeAiSyncService>.Instance, Options.Create(new SesLocalOptions()));
 
         var uuids = new[] { "uuid-1", "uuid-2" };
         var ex    = await Record.ExceptionAsync(() => svc.SyncAsync(uuids));
         Assert.Null(ex);
+    }
+
+    private static IHttpClientFactory BuildNoOpFactory()
+    {
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient(It.IsAny<string>()))
+               .Returns(() => new HttpClient(new UnauthorizedHttpHandler())
+               {
+                   BaseAddress = new Uri("https://claude.ai")
+               });
+        return factory.Object;
+    }
+
+    private sealed class UnauthorizedHttpHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized));
     }
 }

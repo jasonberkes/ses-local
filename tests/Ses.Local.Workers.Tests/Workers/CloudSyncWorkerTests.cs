@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Moq;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
-using Ses.Local.Core.Options;
 using Ses.Local.Workers.Services;
 using Ses.Local.Workers.Workers;
 using Xunit;
@@ -21,8 +19,8 @@ public sealed class CloudSyncWorkerTests
 
         var worker = new CloudSyncWorker(
             db.Object, auth.Object,
-            new DocumentServiceUploader(NullLogger<DocumentServiceUploader>.Instance, Options.Create(new SesLocalOptions())),
-            new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance, Options.Create(new SesLocalOptions())),
+            new DocumentServiceUploader(BuildFailingFactory(), NullLogger<DocumentServiceUploader>.Instance),
+            new CloudMemoryRetainer(BuildFailingFactory(), NullLogger<CloudMemoryRetainer>.Instance),
             NullLogger<CloudSyncWorker>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
@@ -43,8 +41,8 @@ public sealed class CloudSyncWorkerTests
 
         var worker = new CloudSyncWorker(
             db.Object, auth.Object,
-            new DocumentServiceUploader(NullLogger<DocumentServiceUploader>.Instance, Options.Create(new SesLocalOptions())),
-            new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance, Options.Create(new SesLocalOptions())),
+            new DocumentServiceUploader(BuildFailingFactory(), NullLogger<DocumentServiceUploader>.Instance),
+            new CloudMemoryRetainer(BuildFailingFactory(), NullLogger<CloudMemoryRetainer>.Instance),
             NullLogger<CloudSyncWorker>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
@@ -54,7 +52,7 @@ public sealed class CloudSyncWorkerTests
     [Fact]
     public async Task DocumentServiceUploader_WithInvalidEndpoint_ReturnsNull()
     {
-        var uploader = new DocumentServiceUploader(NullLogger<DocumentServiceUploader>.Instance, Options.Create(new SesLocalOptions()));
+        var uploader = new DocumentServiceUploader(BuildFailingFactory(), NullLogger<DocumentServiceUploader>.Instance);
         var session  = new ConversationSession { Id = 1, Title = "Test", ExternalId = "uuid-1" };
         var messages = Array.Empty<ConversationMessage>();
 
@@ -66,7 +64,7 @@ public sealed class CloudSyncWorkerTests
     [Fact]
     public async Task CloudMemoryRetainer_WithEmptyMessages_ReturnsTrue()
     {
-        var retainer = new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance, Options.Create(new SesLocalOptions()));
+        var retainer = new CloudMemoryRetainer(BuildFailingFactory(), NullLogger<CloudMemoryRetainer>.Instance);
         var session  = new ConversationSession { Id = 1, Title = "Test", ExternalId = "uuid-1" };
 
         // Empty messages = nothing to retain = success
@@ -77,7 +75,7 @@ public sealed class CloudSyncWorkerTests
     [Fact]
     public async Task CloudMemoryRetainer_WithNetworkError_ReturnsTrueGracefully()
     {
-        var retainer = new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance, Options.Create(new SesLocalOptions()));
+        var retainer = new CloudMemoryRetainer(BuildNetworkErrorFactory(), NullLogger<CloudMemoryRetainer>.Instance);
         var session  = new ConversationSession { Id = 1, Title = "Test", ExternalId = "uuid-1" };
         var messages = new ConversationMessage[]
         {
@@ -88,5 +86,39 @@ public sealed class CloudSyncWorkerTests
         // Network unreachable = true (graceful degradation, not a sync failure)
         var result = await retainer.RetainAsync(session, messages, "tm_pat_invalid_no_network");
         Assert.True(result); // Memory service down = not a failure
+    }
+
+    private static IHttpClientFactory BuildFailingFactory()
+    {
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient(It.IsAny<string>()))
+               .Returns(() => new HttpClient(new ServiceUnavailableHandler())
+               {
+                   BaseAddress = new Uri("https://test.example.com")
+               });
+        return factory.Object;
+    }
+
+    private static IHttpClientFactory BuildNetworkErrorFactory()
+    {
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient(It.IsAny<string>()))
+               .Returns(() => new HttpClient(new NetworkErrorHandler())
+               {
+                   BaseAddress = new Uri("https://test.example.com")
+               });
+        return factory.Object;
+    }
+
+    private sealed class ServiceUnavailableHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+    }
+
+    private sealed class NetworkErrorHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct) =>
+            Task.FromException<HttpResponseMessage>(new HttpRequestException("Network error"));
     }
 }

@@ -1,9 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Ses.Local.Core.Models;
-using Ses.Local.Core.Options;
 
 namespace Ses.Local.Workers.Services;
 
@@ -14,14 +12,14 @@ namespace Ses.Local.Workers.Services;
 /// </summary>
 public sealed class CloudMemoryRetainer
 {
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<CloudMemoryRetainer> _logger;
-    private readonly string _memoryBaseUrl;
     private static readonly JsonSerializerOptions s_json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public CloudMemoryRetainer(ILogger<CloudMemoryRetainer> logger, IOptions<SesLocalOptions> options)
+    public CloudMemoryRetainer(IHttpClientFactory httpClientFactory, ILogger<CloudMemoryRetainer> logger)
     {
-        _logger = logger;
-        _memoryBaseUrl = options.Value.MemoryBaseUrl;
+        _httpClientFactory = httpClientFactory;
+        _logger            = logger;
     }
 
     /// <summary>
@@ -52,7 +50,10 @@ public sealed class CloudMemoryRetainer
 
         try
         {
-            using var http = BuildHttpClient(pat);
+            var http = _httpClientFactory.CreateClient(DependencyInjection.CloudMemoryClientName);
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", pat);
+
             var body = new
             {
                 content,
@@ -87,17 +88,5 @@ public sealed class CloudMemoryRetainer
             _logger.LogWarning(ex, "Unexpected error retaining memory for session {Id}", session.Id);
             return false;
         }
-    }
-
-    private System.Net.Http.HttpClient BuildHttpClient(string pat)
-    {
-        var http = new System.Net.Http.HttpClient
-        {
-            BaseAddress = new Uri(_memoryBaseUrl),
-            Timeout     = TimeSpan.FromSeconds(15)
-        };
-        http.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", pat);
-        return http;
     }
 }

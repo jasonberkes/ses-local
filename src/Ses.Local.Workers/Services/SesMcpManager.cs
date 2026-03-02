@@ -25,6 +25,7 @@ public sealed class SesMcpHealthStatus
 /// </summary>
 public sealed class SesMcpManager
 {
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ICredentialStore _keychain;
     private readonly SesMcpUpdater _updater;
     private readonly IAuthService _auth;
@@ -38,12 +39,14 @@ public sealed class SesMcpManager
     private string[] SesCloudArgs => ["-y", "@anthropic-ai/mcp-proxy", _cloudMcpUrl];
 
     public SesMcpManager(
+        IHttpClientFactory httpClientFactory,
         ICredentialStore keychain,
         SesMcpUpdater updater,
         IAuthService auth,
         ILogger<SesMcpManager> logger,
         IOptions<SesLocalOptions> options)
     {
+        _httpClientFactory = httpClientFactory;
         _keychain          = keychain;
         _updater           = updater;
         _auth              = auth;
@@ -113,7 +116,7 @@ public sealed class SesMcpManager
                 return;
             }
 
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+            var http = _httpClientFactory.CreateClient(DependencyInjection.SesMcpInstallClientName);
             var bytes = await http.GetByteArrayAsync(downloadUrl, ct);
             await File.WriteAllBytesAsync(targetPath, bytes, ct);
 
@@ -139,7 +142,7 @@ public sealed class SesMcpManager
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            var http = _httpClientFactory.CreateClient(DependencyInjection.SesMcpInstallClientName);
             var json = await http.GetStringAsync(_sesMcpManifestUrl, ct);
             return JsonSerializer.Deserialize(json, UpdateManifestJsonContext.Default.UpdateManifest);
         }

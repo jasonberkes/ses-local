@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http.Resilience;
 using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Options;
@@ -9,6 +10,11 @@ namespace Ses.Local.Workers;
 
 public static class DependencyInjection
 {
+    // Named client keys
+    internal const string DocumentServiceClientName = "DocumentService";
+    internal const string CloudMemoryClientName      = "CloudMemory";
+    internal const string SesMcpInstallClientName    = "SesMcpInstall";
+
     public static IServiceCollection AddSesLocalWorkers(
         this IServiceCollection services,
         IConfiguration? configuration = null)
@@ -34,19 +40,30 @@ public static class DependencyInjection
         else
             services.AddSingleton<ICredentialStore, InMemoryCredentialStore>(); // Linux/CI
 
-        // Identity HTTP client — base address driven by options
+        // Identity HTTP client — 2 retries, 10s total timeout, base address from options
         services.AddHttpClient<IdentityClient>((sp, client) =>
         {
             var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
             client.BaseAddress = new Uri(opts.IdentityBaseUrl.TrimEnd('/') + "/");
-            client.Timeout = TimeSpan.FromSeconds(30);
+        })
+        .AddStandardResilienceHandler(options =>
+        {
+            options.Retry.MaxRetryAttempts = 2;
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(10);
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(3);
         });
 
-        // License validation HTTP client
-        services.AddHttpClient<LicenseValidationClient>(client =>
+        // License validation HTTP client — uses identity server base URL
+        services.AddHttpClient<LicenseValidationClient>((sp, client) =>
         {
-            client.BaseAddress = new Uri("https://identity.tm.supereasysoftware.com/");
-            client.Timeout = TimeSpan.FromSeconds(15);
+            var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
+            client.BaseAddress = new Uri(opts.IdentityBaseUrl.TrimEnd('/') + "/");
+        })
+        .AddStandardResilienceHandler(options =>
+        {
+            options.Retry.MaxRetryAttempts = 2;
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(15);
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(5);
         });
 
         // Auth service
@@ -54,6 +71,32 @@ public static class DependencyInjection
 
         // License service
         services.AddSingleton<ILicenseService, LicenseService>();
+
+        // DocumentService HTTP client — 3 retries, 30s total timeout, URL from options
+        services.AddHttpClient(DocumentServiceClientName, (sp, client) =>
+        {
+            var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
+            client.BaseAddress = new Uri(opts.DocumentServiceBaseUrl.TrimEnd('/') + "/");
+        })
+        .AddStandardResilienceHandler(options =>
+        {
+            options.Retry.MaxRetryAttempts = 3;
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(30);
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(7);
+        });
+
+        // CloudMemory HTTP client — 2 retries, 15s total timeout, URL from options
+        services.AddHttpClient(CloudMemoryClientName, (sp, client) =>
+        {
+            var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
+            client.BaseAddress = new Uri(opts.MemoryBaseUrl.TrimEnd('/') + "/");
+        })
+        .AddStandardResilienceHandler(options =>
+        {
+            options.Retry.MaxRetryAttempts = 2;
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(15);
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(5);
+        });
 
         // Cloud sync services
         services.AddSingleton<DocumentServiceUploader>();
@@ -64,20 +107,42 @@ public static class DependencyInjection
         services.AddSingleton<IDesktopActivityNotifier, DesktopActivityNotifier>();
 
         // Claude.ai API client + sync service (WI-941)
+        // No resilience — uses session cookies and has custom rate limiting
+        services.AddHttpClient(ClaudeAiClient.HttpClientName, (sp, client) =>
+        {
+            var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
+            client.BaseAddress = new Uri(opts.ClaudeAiBaseUrl.TrimEnd('/') + "/");
+            client.Timeout     = TimeSpan.FromSeconds(30);
+        });
         services.AddSingleton<ClaudeSessionCookieExtractor>();
         services.AddSingleton<ClaudeAiSyncService>();
 
-        // Auto-updaters
-        services.AddHttpClient<SesLocalUpdater>(client =>
+        // SesMcp binary install client — 3 retries, 60s per-attempt timeout
+        services.AddHttpClient(SesMcpInstallClientName)
+        .AddStandardResilienceHandler(options =>
         {
-            client.Timeout = TimeSpan.FromSeconds(30);
+            options.Retry.MaxRetryAttempts = 3;
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
         });
-        services.AddHttpClient<SesMcpUpdater>(client =>
+
+        // Auto-updaters — 3 retries, 60s per-attempt timeout (binary downloads)
+        services.AddHttpClient<SesLocalUpdater>()
+        .AddStandardResilienceHandler(options =>
         {
-            client.Timeout = TimeSpan.FromSeconds(30);
+            options.Retry.MaxRetryAttempts = 3;
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
         });
-        services.AddSingleton<SesLocalUpdater>();
-        services.AddSingleton<SesMcpUpdater>();
+
+        services.AddHttpClient<SesMcpUpdater>()
+        .AddStandardResilienceHandler(options =>
+        {
+            options.Retry.MaxRetryAttempts = 3;
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
+        });
+
         services.AddSingleton<SesMcpManager>();
 
         return services;

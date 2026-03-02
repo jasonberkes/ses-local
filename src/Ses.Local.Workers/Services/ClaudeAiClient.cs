@@ -8,6 +8,8 @@ namespace Ses.Local.Workers.Services;
 
 public sealed class ClaudeAiClient : IDisposable
 {
+    internal const string HttpClientName = "ClaudeAi";
+
     private readonly HttpClient _http;
     private readonly ILogger<ClaudeAiClient> _logger;
     private string? _orgId;
@@ -16,23 +18,17 @@ public sealed class ClaudeAiClient : IDisposable
     private readonly SemaphoreSlim _rateLimiter = new(5, 5);
     private static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(1);
 
-    private const string DefaultBaseUrl = "https://claude.ai";
-
-    public ClaudeAiClient(string sessionCookie, ILogger<ClaudeAiClient> logger,
-        string baseUrl = DefaultBaseUrl)
+    public ClaudeAiClient(HttpClient http, string sessionCookie, ILogger<ClaudeAiClient> logger)
     {
+        _http   = http;
         _logger = logger;
-        _http   = new HttpClient
-        {
-            BaseAddress = new Uri(baseUrl),
-            Timeout     = TimeSpan.FromSeconds(30)
-        };
+        var referer = _http.BaseAddress?.AbsoluteUri ?? "https://claude.ai/";
         // Set the cookie in both possible formats
         _http.DefaultRequestHeaders.Add("Cookie",
             $"sessionKey={sessionCookie}; __Host-next-auth.session-token={sessionCookie}");
         _http.DefaultRequestHeaders.Add("User-Agent",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-        _http.DefaultRequestHeaders.Add("Referer", baseUrl.TrimEnd('/') + "/");
+        _http.DefaultRequestHeaders.Add("Referer", referer);
     }
 
     public async Task<string?> GetOrgIdAsync(CancellationToken ct = default)
