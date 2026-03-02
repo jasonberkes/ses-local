@@ -181,6 +181,130 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         return results;
     }
 
+    public async Task UpsertObservationsAsync(IEnumerable<ConversationObservation> observations, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var tx = conn.BeginTransaction();
+        try
+        {
+            foreach (var obs in observations)
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = """
+                    INSERT INTO conv_observations
+                        (session_id, observation_type, tool_name, file_path, content, token_count, sequence_number, parent_observation_id, created_at)
+                    VALUES
+                        (@session_id, @observation_type, @tool_name, @file_path, @content, @token_count, @sequence_number, @parent_observation_id, @created_at)
+                    ON CONFLICT(session_id, sequence_number) DO UPDATE SET
+                        observation_type     = excluded.observation_type,
+                        tool_name            = excluded.tool_name,
+                        file_path            = excluded.file_path,
+                        content              = excluded.content,
+                        token_count          = excluded.token_count,
+                        parent_observation_id = excluded.parent_observation_id
+                    """;
+                cmd.Parameters.AddWithValue("@session_id",            obs.SessionId);
+                cmd.Parameters.AddWithValue("@observation_type",      obs.ObservationType.ToString());
+                cmd.Parameters.AddWithValue("@tool_name",             obs.ToolName ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@file_path",             obs.FilePath ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@content",               obs.Content);
+                cmd.Parameters.AddWithValue("@token_count",           obs.TokenCount.HasValue ? (object)obs.TokenCount.Value : DBNull.Value);
+                cmd.Parameters.AddWithValue("@sequence_number",       obs.SequenceNumber);
+                cmd.Parameters.AddWithValue("@parent_observation_id", obs.ParentObservationId.HasValue ? (object)obs.ParentObservationId.Value : DBNull.Value);
+                cmd.Parameters.AddWithValue("@created_at",            obs.CreatedAt.ToString("O"));
+                await cmd.ExecuteNonQueryAsync(ct);
+
+                // Sync back DB-assigned Id
+                if (obs.Id == 0)
+                {
+                    await using var idCmd = conn.CreateCommand();
+                    idCmd.Transaction  = tx;
+                    idCmd.CommandText  = "SELECT id FROM conv_observations WHERE session_id = @sid AND sequence_number = @seq";
+                    idCmd.Parameters.AddWithValue("@sid", obs.SessionId);
+                    idCmd.Parameters.AddWithValue("@seq", obs.SequenceNumber);
+                    var result = await idCmd.ExecuteScalarAsync(ct);
+                    if (result is long id) obs.Id = id;
+                }
+            }
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    public async Task<IReadOnlyList<ConversationObservation>> GetObservationsAsync(long sessionId, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, session_id, observation_type, tool_name, file_path, content, token_count,
+                   sequence_number, parent_observation_id, created_at
+            FROM conv_observations
+            WHERE session_id = @session_id
+            ORDER BY sequence_number
+            """;
+        cmd.Parameters.AddWithValue("@session_id", sessionId);
+
+        var results = new List<ConversationObservation>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapObservation(reader));
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<ConversationObservation>> SearchObservationsAsync(string query, int limit = 10, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT o.id, o.session_id, o.observation_type, o.tool_name, o.file_path, o.content,
+                   o.token_count, o.sequence_number, o.parent_observation_id, o.created_at
+            FROM conv_observations_fts fts
+            JOIN conv_observations o ON o.id = fts.rowid
+            WHERE conv_observations_fts MATCH @query
+            ORDER BY rank
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@query", query);
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var results = new List<ConversationObservation>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapObservation(reader));
+
+        return results;
+    }
+
+    public async Task UpdateObservationParentsAsync(IEnumerable<(long observationId, long parentId)> updates, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var tx = conn.BeginTransaction();
+        try
+        {
+            foreach (var (observationId, parentId) in updates)
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.Transaction   = tx;
+                cmd.CommandText   = "UPDATE conv_observations SET parent_observation_id = @parent WHERE id = @id";
+                cmd.Parameters.AddWithValue("@parent", parentId);
+                cmd.Parameters.AddWithValue("@id",     observationId);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
     // ── Schema ────────────────────────────────────────────────────────────────
 
     private async Task EnsureSchemaAsync(SqliteConnection conn, CancellationToken ct)
@@ -197,6 +321,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         {
             await ApplyMigration1Async(conn, ct);
             await SetUserVersionAsync(conn, 1, ct);
+        }
+
+        if (version < 2)
+        {
+            await ApplyMigration2Async(conn, ct);
+            await SetUserVersionAsync(conn, 2, ct);
         }
     }
 
@@ -297,6 +427,60 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             """, ct);
     }
 
+    private static async Task ApplyMigration2Async(SqliteConnection conn, CancellationToken ct)
+    {
+        // conv_observations — one row per content block (tool_use, tool_result, text, thinking)
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE IF NOT EXISTS conv_observations (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id            INTEGER NOT NULL REFERENCES conv_sessions(id) ON DELETE CASCADE,
+                observation_type      TEXT NOT NULL,
+                tool_name             TEXT NULL,
+                file_path             TEXT NULL,
+                content               TEXT NOT NULL DEFAULT '',
+                token_count           INTEGER NULL,
+                sequence_number       INTEGER NOT NULL,
+                parent_observation_id INTEGER NULL REFERENCES conv_observations(id) ON DELETE SET NULL,
+                created_at            TEXT NOT NULL,
+                UNIQUE(session_id, sequence_number)
+            )
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_obs_session ON conv_observations(session_id)", ct);
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_obs_type ON conv_observations(observation_type)", ct);
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_obs_parent ON conv_observations(parent_observation_id)", ct);
+
+        // FTS5 virtual table — searches content, tool_name, and file_path
+        await ExecuteNonQueryAsync(conn, """
+            CREATE VIRTUAL TABLE IF NOT EXISTS conv_observations_fts
+            USING fts5(content, tool_name, file_path, content='conv_observations', content_rowid='id')
+            """, ct);
+
+        // FTS triggers to keep the index in sync (mirrors conv_messages_fts pattern)
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TRIGGER IF NOT EXISTS conv_observations_ai AFTER INSERT ON conv_observations BEGIN
+                INSERT INTO conv_observations_fts(rowid, content, tool_name, file_path)
+                VALUES (new.id, new.content, COALESCE(new.tool_name, ''), COALESCE(new.file_path, ''));
+            END
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TRIGGER IF NOT EXISTS conv_observations_ad AFTER DELETE ON conv_observations BEGIN
+                INSERT INTO conv_observations_fts(conv_observations_fts, rowid, content, tool_name, file_path)
+                VALUES ('delete', old.id, old.content, COALESCE(old.tool_name, ''), COALESCE(old.file_path, ''));
+            END
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TRIGGER IF NOT EXISTS conv_observations_au AFTER UPDATE ON conv_observations BEGIN
+                INSERT INTO conv_observations_fts(conv_observations_fts, rowid, content, tool_name, file_path)
+                VALUES ('delete', old.id, old.content, COALESCE(old.tool_name, ''), COALESCE(old.file_path, ''));
+                INSERT INTO conv_observations_fts(rowid, content, tool_name, file_path)
+                VALUES (new.id, new.content, COALESCE(new.tool_name, ''), COALESCE(new.file_path, ''));
+            END
+            """, ct);
+    }
+
     // ── Connection management ─────────────────────────────────────────────────
 
     private async Task<SqliteConnection> GetConnectionAsync(CancellationToken ct)
@@ -367,6 +551,20 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         Content    = r.GetString(3),
         CreatedAt  = DateTime.Parse(r.GetString(4)),
         TokenCount = r.IsDBNull(5) ? null : r.GetInt32(5)
+    };
+
+    private static ConversationObservation MapObservation(SqliteDataReader r) => new()
+    {
+        Id                   = r.GetInt64(0),
+        SessionId            = r.GetInt64(1),
+        ObservationType      = Enum.Parse<ObservationType>(r.GetString(2)),
+        ToolName             = r.IsDBNull(3) ? null : r.GetString(3),
+        FilePath             = r.IsDBNull(4) ? null : r.GetString(4),
+        Content              = r.GetString(5),
+        TokenCount           = r.IsDBNull(6) ? null : r.GetInt32(6),
+        SequenceNumber       = r.GetInt32(7),
+        ParentObservationId  = r.IsDBNull(8) ? null : r.GetInt64(8),
+        CreatedAt            = DateTime.Parse(r.GetString(9))
     };
 
     public async ValueTask DisposeAsync()
