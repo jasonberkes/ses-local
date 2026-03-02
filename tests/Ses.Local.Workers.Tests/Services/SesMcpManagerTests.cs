@@ -24,10 +24,11 @@ public sealed class SesMcpManagerTests
         keychain.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string?)null);
 
+        var factory = BuildFailingFactory();
         var updater = BuildUpdater();
         var auth    = new Mock<IAuthService>();
 
-        var manager = new SesMcpManager(keychain.Object, updater, auth.Object,
+        var manager = new SesMcpManager(factory, keychain.Object, updater, auth.Object,
             NullLogger<SesMcpManager>.Instance);
 
         // Should not throw even if binary missing and network unavailable
@@ -44,10 +45,11 @@ public sealed class SesMcpManagerTests
         keychain.Setup(x => x.SetAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        var factory = BuildFailingFactory();
         var updater = BuildUpdater();
         var auth    = new Mock<IAuthService>();
 
-        var manager = new SesMcpManager(keychain.Object, updater, auth.Object,
+        var manager = new SesMcpManager(factory, keychain.Object, updater, auth.Object,
             NullLogger<SesMcpManager>.Instance);
 
         // Should not throw regardless of whether Claude Desktop is installed
@@ -93,6 +95,14 @@ public sealed class SesMcpManagerTests
         var handler = new FakeHttpHandler();
         var http    = new HttpClient(handler);
         return new SesMcpUpdater(NullLogger<SesMcpUpdater>.Instance, http);
+    }
+
+    private static IHttpClientFactory BuildFailingFactory()
+    {
+        var factory = new Mock<IHttpClientFactory>();
+        factory.Setup(f => f.CreateClient(It.IsAny<string>()))
+               .Returns(() => new HttpClient(new FakeHttpHandler()));
+        return factory.Object;
     }
 
     private sealed class FakeHttpHandler : HttpMessageHandler

@@ -8,6 +8,8 @@ namespace Ses.Local.Workers.Services;
 
 public sealed class ClaudeAiClient : IDisposable
 {
+    internal const string HttpClientName = "ClaudeAi";
+
     private readonly HttpClient _http;
     private readonly ILogger<ClaudeAiClient> _logger;
     private string? _orgId;
@@ -16,14 +18,10 @@ public sealed class ClaudeAiClient : IDisposable
     private readonly SemaphoreSlim _rateLimiter = new(5, 5);
     private static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(1);
 
-    public ClaudeAiClient(string sessionCookie, ILogger<ClaudeAiClient> logger)
+    public ClaudeAiClient(HttpClient http, string sessionCookie, ILogger<ClaudeAiClient> logger)
     {
+        _http   = http;
         _logger = logger;
-        _http   = new HttpClient
-        {
-            BaseAddress = new Uri("https://claude.ai"),
-            Timeout     = TimeSpan.FromSeconds(30)
-        };
         // Set the cookie in both possible formats
         _http.DefaultRequestHeaders.Add("Cookie",
             $"sessionKey={sessionCookie}; __Host-next-auth.session-token={sessionCookie}");

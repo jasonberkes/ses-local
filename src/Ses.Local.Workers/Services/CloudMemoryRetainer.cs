@@ -12,11 +12,15 @@ namespace Ses.Local.Workers.Services;
 /// </summary>
 public sealed class CloudMemoryRetainer
 {
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<CloudMemoryRetainer> _logger;
-    private const string MemoryBaseUrl = "https://memory.tm.supereasysoftware.com";
     private static readonly JsonSerializerOptions s_json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public CloudMemoryRetainer(ILogger<CloudMemoryRetainer> logger) => _logger = logger;
+    public CloudMemoryRetainer(IHttpClientFactory httpClientFactory, ILogger<CloudMemoryRetainer> logger)
+    {
+        _httpClientFactory = httpClientFactory;
+        _logger            = logger;
+    }
 
     /// <summary>
     /// Retains a summary of the conversation as a memory.
@@ -46,7 +50,10 @@ public sealed class CloudMemoryRetainer
 
         try
         {
-            using var http = BuildHttpClient(pat);
+            var http = _httpClientFactory.CreateClient(DependencyInjection.CloudMemoryClientName);
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", pat);
+
             var body = new
             {
                 content,
@@ -81,17 +88,5 @@ public sealed class CloudMemoryRetainer
             _logger.LogWarning(ex, "Unexpected error retaining memory for session {Id}", session.Id);
             return false;
         }
-    }
-
-    private static System.Net.Http.HttpClient BuildHttpClient(string pat)
-    {
-        var http = new System.Net.Http.HttpClient
-        {
-            BaseAddress = new Uri(MemoryBaseUrl),
-            Timeout     = TimeSpan.FromSeconds(15)
-        };
-        http.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", pat);
-        return http;
     }
 }

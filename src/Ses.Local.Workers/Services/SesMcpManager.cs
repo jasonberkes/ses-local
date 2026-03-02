@@ -23,6 +23,7 @@ public sealed class SesMcpHealthStatus
 /// </summary>
 public sealed class SesMcpManager
 {
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ICredentialStore _keychain;
     private readonly SesMcpUpdater _updater;
     private readonly IAuthService _auth;
@@ -35,15 +36,17 @@ public sealed class SesMcpManager
     private static readonly string[] SesCloudArgs = ["-y", "@anthropic-ai/mcp-proxy", CloudMcpUrl];
 
     public SesMcpManager(
+        IHttpClientFactory httpClientFactory,
         ICredentialStore keychain,
         SesMcpUpdater updater,
         IAuthService auth,
         ILogger<SesMcpManager> logger)
     {
-        _keychain = keychain;
-        _updater  = updater;
-        _auth     = auth;
-        _logger   = logger;
+        _httpClientFactory = httpClientFactory;
+        _keychain          = keychain;
+        _updater           = updater;
+        _auth              = auth;
+        _logger            = logger;
     }
 
     public async Task<SesMcpHealthStatus> CheckAndRepairAsync(CancellationToken ct = default)
@@ -107,7 +110,7 @@ public sealed class SesMcpManager
                 return;
             }
 
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+            var http = _httpClientFactory.CreateClient(DependencyInjection.SesMcpInstallClientName);
             var bytes = await http.GetByteArrayAsync(downloadUrl, ct);
             await File.WriteAllBytesAsync(targetPath, bytes, ct);
 
@@ -129,11 +132,11 @@ public sealed class SesMcpManager
         }
     }
 
-    private static async Task<UpdateManifest?> FetchManifestAsync(CancellationToken ct)
+    private async Task<UpdateManifest?> FetchManifestAsync(CancellationToken ct)
     {
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            var http = _httpClientFactory.CreateClient(DependencyInjection.SesMcpInstallClientName);
             var json = await http.GetStringAsync(
                 "https://tmprodeus2data.blob.core.windows.net/artifacts/ses-mcp/latest.json", ct);
             return JsonSerializer.Deserialize(json, UpdateManifestJsonContext.Default.UpdateManifest);

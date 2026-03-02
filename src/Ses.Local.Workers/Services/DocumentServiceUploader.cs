@@ -12,9 +12,8 @@ namespace Ses.Local.Workers.Services;
 /// </summary>
 public sealed class DocumentServiceUploader
 {
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<DocumentServiceUploader> _logger;
-    private const string DocServiceUrl =
-        "https://tm-documentservice-prod-eus2.redhill-040b1667.eastus2.azurecontainerapps.io";
 
     // DocumentTypeId 4 = Transcript (from docs schema)
     private const int TranscriptTypeId = 4;
@@ -22,8 +21,11 @@ public sealed class DocumentServiceUploader
     // Tenant ID for ses-local (int, not Guid)
     private const int DefaultTenantId = 1;
 
-    public DocumentServiceUploader(ILogger<DocumentServiceUploader> logger)
-        => _logger = logger;
+    public DocumentServiceUploader(IHttpClientFactory httpClientFactory, ILogger<DocumentServiceUploader> logger)
+    {
+        _httpClientFactory = httpClientFactory;
+        _logger            = logger;
+    }
 
     /// <summary>
     /// Uploads a conversation transcript. Returns the document ID, or null on failure.
@@ -36,8 +38,11 @@ public sealed class DocumentServiceUploader
     {
         try
         {
-            using var http = BuildHttpClient(pat);
-            var client     = new DocumentServiceClient(http);
+            var http = _httpClientFactory.CreateClient(DependencyInjection.DocumentServiceClientName);
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", pat);
+
+            var client = new DocumentServiceClient(http);
 
             var transcript = FormatTranscript(session, messages);
             var metadataJson = JsonSerializer.Serialize(new
@@ -88,17 +93,5 @@ public sealed class DocumentServiceUploader
         }
 
         return sb.ToString();
-    }
-
-    private static System.Net.Http.HttpClient BuildHttpClient(string pat)
-    {
-        var http = new System.Net.Http.HttpClient
-        {
-            BaseAddress = new Uri(DocServiceUrl),
-            Timeout     = TimeSpan.FromSeconds(30)
-        };
-        http.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", pat);
-        return http;
     }
 }
