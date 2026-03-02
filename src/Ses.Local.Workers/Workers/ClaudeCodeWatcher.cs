@@ -167,9 +167,17 @@ public sealed class ClaudeCodeWatcher : BackgroundService
         stream.Seek(startPos, SeekOrigin.Begin);
         using var reader = new StreamReader(stream);
 
-        var newMessages = new List<ConversationMessage>();
+        var newMessages     = new List<ConversationMessage>();
+        var newObservations = new List<ConversationObservation>();
+
+        // Maps Claude's internal tool_use id → index in newObservations (for parent linking)
+        var toolUseClaudeIds = new Dictionary<string, int>();
+        // Maps newObservations index → Claude tool_use_id that the tool_result references
+        var pendingParentRefs = new Dictionary<int, string>();
+
         ConversationSession? session = null;
         string? cwd = null;
+        int nextSequence = 0;
 
         string? line;
         while ((line = await reader.ReadLineAsync(ct)) is not null)
@@ -186,8 +194,8 @@ public sealed class ClaudeCodeWatcher : BackgroundService
                 // Extract session metadata from first user message
                 if (type == "user" && session is null)
                 {
-                    cwd       = node["cwd"]?.GetValue<string>();
-                    var ts    = ParseTimestamp(node["timestamp"]);
+                    cwd    = node["cwd"]?.GetValue<string>();
+                    var ts = ParseTimestamp(node["timestamp"]);
 
                     session = new ConversationSession
                     {
@@ -199,7 +207,7 @@ public sealed class ClaudeCodeWatcher : BackgroundService
                     };
                 }
 
-                // Parse messages
+                // Parse legacy flat messages (unchanged — backward compatible)
                 var msg = ParseMessage(node, type);
                 if (msg is not null)
                 {
@@ -207,6 +215,13 @@ public sealed class ClaudeCodeWatcher : BackgroundService
                     if (session is not null && msg.CreatedAt > session.UpdatedAt)
                         session.UpdatedAt = msg.CreatedAt;
                 }
+
+                // Parse structured observations from content blocks
+                var timestamp = ParseTimestamp(node["timestamp"]);
+                ExtractObservations(
+                    node, type, timestamp,
+                    newObservations, toolUseClaudeIds, pendingParentRefs,
+                    ref nextSequence);
             }
             catch (JsonException ex)
             {
@@ -223,13 +238,223 @@ public sealed class ClaudeCodeWatcher : BackgroundService
         // Upsert session first to get Id
         await _db.UpsertSessionAsync(session, ct);
 
-        // Assign session Id to all messages
+        // Assign session Id to all messages and observations
         foreach (var msg in newMessages)
             msg.SessionId = session.Id;
 
+        foreach (var obs in newObservations)
+            obs.SessionId = session.Id;
+
         await _db.UpsertMessagesAsync(newMessages, ct);
 
-        _logger.LogDebug("Processed {Count} new messages from {File}", newMessages.Count, filePath);
+        if (newObservations.Count > 0)
+        {
+            // UpsertObservationsAsync syncs back Id on each observation
+            await _db.UpsertObservationsAsync(newObservations, ct);
+
+            // Resolve tool_result → tool_use parent links
+            var parentUpdates = ResolveParentLinks(newObservations, toolUseClaudeIds, pendingParentRefs);
+            if (parentUpdates.Count > 0)
+                await _db.UpdateObservationParentsAsync(parentUpdates, ct);
+        }
+
+        _logger.LogDebug("Processed {MsgCount} messages, {ObsCount} observations from {File}",
+            newMessages.Count, newObservations.Count, filePath);
+    }
+
+    // ── Observation Extraction ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Extracts structured observations from a single JSONL line's content blocks,
+    /// appending to <paramref name="observations"/> and updating tracking dictionaries.
+    /// </summary>
+    private static void ExtractObservations(
+        JsonNode node,
+        string? type,
+        DateTime timestamp,
+        List<ConversationObservation> observations,
+        Dictionary<string, int> toolUseClaudeIds,
+        Dictionary<int, string> pendingParentRefs,
+        ref int nextSequence)
+    {
+        if (type != "user" && type != "assistant") return;
+
+        var msgNode    = node["message"];
+        // content may be a plain string (user text) — only process array-form blocks
+        if (msgNode?["content"] is not JsonArray contentArr) return;
+
+        foreach (var block in contentArr)
+        {
+            if (block is null) continue;
+            var blockType = block["type"]?.GetValue<string>();
+
+            switch (blockType)
+            {
+                case "tool_use":
+                {
+                    var toolName    = block["name"]?.GetValue<string>() ?? string.Empty;
+                    var inputNode   = block["input"];
+                    var inputJson   = inputNode?.ToJsonString() ?? "{}";
+                    var filePath    = ExtractFilePath(inputNode);
+                    var obsType     = ClassifyToolUse(toolName, inputNode);
+                    var claudeId    = block["id"]?.GetValue<string>();
+
+                    var obs = new ConversationObservation
+                    {
+                        ObservationType = obsType,
+                        ToolName        = toolName,
+                        FilePath        = filePath,
+                        Content         = inputJson.Trim(),
+                        SequenceNumber  = nextSequence,
+                        CreatedAt       = timestamp
+                    };
+
+                    var idx = observations.Count;
+                    observations.Add(obs);
+
+                    if (!string.IsNullOrEmpty(claudeId))
+                        toolUseClaudeIds[claudeId] = idx;
+
+                    nextSequence++;
+                    break;
+                }
+
+                case "tool_result":
+                {
+                    var rawContent = block["content"];
+                    var content    = rawContent is JsonValue
+                        ? rawContent.GetValue<string>()
+                        : rawContent?.ToJsonString() ?? string.Empty;
+                    content = content.Trim();
+
+                    var obsType    = ClassifyToolResult(content);
+                    var parentRef  = block["tool_use_id"]?.GetValue<string>();
+
+                    var obs = new ConversationObservation
+                    {
+                        ObservationType = obsType,
+                        Content         = content,
+                        SequenceNumber  = nextSequence,
+                        CreatedAt       = timestamp
+                    };
+
+                    var idx = observations.Count;
+                    observations.Add(obs);
+
+                    if (!string.IsNullOrEmpty(parentRef))
+                        pendingParentRefs[idx] = parentRef;
+
+                    nextSequence++;
+                    break;
+                }
+
+                case "text":
+                {
+                    var text = block["text"]?.GetValue<string>() ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(text)) continue;
+
+                    observations.Add(new ConversationObservation
+                    {
+                        ObservationType = ObservationType.Text,
+                        Content         = text.Trim(),
+                        SequenceNumber  = nextSequence,
+                        CreatedAt       = timestamp
+                    });
+                    nextSequence++;
+                    break;
+                }
+
+                case "thinking":
+                {
+                    var thinking = block["thinking"]?.GetValue<string>() ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(thinking)) continue;
+
+                    observations.Add(new ConversationObservation
+                    {
+                        ObservationType = ObservationType.Thinking,
+                        Content         = thinking.Trim(),
+                        SequenceNumber  = nextSequence,
+                        CreatedAt       = timestamp
+                    });
+                    nextSequence++;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// After UpsertObservationsAsync has synced back DB Ids, builds the list of
+    /// (tool_result observationId, tool_use parentId) pairs for UpdateObservationParentsAsync.
+    /// </summary>
+    private static List<(long observationId, long parentId)> ResolveParentLinks(
+        List<ConversationObservation> observations,
+        Dictionary<string, int> toolUseClaudeIds,
+        Dictionary<int, string> pendingParentRefs)
+    {
+        // Build reverse map: claudeToolUseId → DB id (now available after upsert)
+        var claudeIdToDbId = new Dictionary<string, long>(toolUseClaudeIds.Count);
+        foreach (var (claudeId, idx) in toolUseClaudeIds)
+        {
+            var dbId = observations[idx].Id;
+            if (dbId > 0)
+                claudeIdToDbId[claudeId] = dbId;
+        }
+
+        var result = new List<(long, long)>();
+        foreach (var (resultIdx, parentClaudeId) in pendingParentRefs)
+        {
+            if (!claudeIdToDbId.TryGetValue(parentClaudeId, out var parentDbId)) continue;
+            var resultDbId = observations[resultIdx].Id;
+            if (resultDbId > 0)
+                result.Add((resultDbId, parentDbId));
+        }
+        return result;
+    }
+
+    // ── Classification helpers ────────────────────────────────────────────────
+
+    private static ObservationType ClassifyToolUse(string toolName, JsonNode? inputNode)
+    {
+        if (!string.Equals(toolName, "Bash", StringComparison.OrdinalIgnoreCase))
+            return ObservationType.ToolUse;
+
+        var command = inputNode?["command"]?.GetValue<string>() ?? string.Empty;
+
+        if (command.Contains("git commit", StringComparison.OrdinalIgnoreCase))
+            return ObservationType.GitCommit;
+
+        if (command.Contains("dotnet test", StringComparison.OrdinalIgnoreCase) ||
+            command.Contains("npm test",    StringComparison.OrdinalIgnoreCase) ||
+            command.Contains("pytest",      StringComparison.OrdinalIgnoreCase) ||
+            command.Contains("yarn test",   StringComparison.OrdinalIgnoreCase))
+            return ObservationType.TestResult;
+
+        return ObservationType.ToolUse;
+    }
+
+    private static ObservationType ClassifyToolResult(string content)
+    {
+        if (content.Contains("error",     StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
+            content.Contains("failed",    StringComparison.OrdinalIgnoreCase))
+            return ObservationType.Error;
+
+        return ObservationType.ToolResult;
+    }
+
+    /// <summary>
+    /// Extracts a file path from a tool_use input node by checking common key names.
+    /// </summary>
+    internal static string? ExtractFilePath(JsonNode? inputNode)
+    {
+        if (inputNode is null) return null;
+        foreach (var key in new[] { "path", "file_path", "filename" })
+        {
+            var val = inputNode[key]?.GetValue<string>();
+            if (!string.IsNullOrEmpty(val)) return val;
+        }
+        return null;
     }
 
     // ── Position Persistence ──────────────────────────────────────────────────

@@ -14,7 +14,7 @@ public sealed class DocumentServiceUploader
 {
     private readonly ILogger<DocumentServiceUploader> _logger;
     private const string DocServiceUrl =
-        "https://tm-documentservice-prod-eus2.thankfulsand-8986c25c.eastus2.azurecontainerapps.io";
+        "https://tm-documentservice-prod-eus2.redhill-040b1667.eastus2.azurecontainerapps.io";
 
     // DocumentTypeId 4 = Transcript (from docs schema)
     private const int TranscriptTypeId = 4;
