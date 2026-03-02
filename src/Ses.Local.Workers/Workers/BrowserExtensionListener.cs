@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -10,14 +10,13 @@ using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
 using Ses.Local.Core.Options;
 using Microsoft.Extensions.Options;
-using System.Security.Cryptography;
 
 namespace Ses.Local.Workers.Workers;
 
 /// <summary>
-/// Hosts a minimal HTTP listener on localhost:37780 for the browser extension.
-/// Receives conversation batches and stores them in ILocalDbService.
-/// All traffic is localhost-only; no external network exposure.
+/// Hosts a minimal HTTP listener on localhost:37780 for the browser extension
+/// and OAuth loopback callback. All IPC (status, signout, shutdown) is handled
+/// by the daemon's Kestrel listener on a Unix domain socket.
 /// </summary>
 public sealed class BrowserExtensionListener : BackgroundService
 {
@@ -25,8 +24,6 @@ public sealed class BrowserExtensionListener : BackgroundService
     private readonly IAuthService _auth;
     private readonly ILogger<BrowserExtensionListener> _logger;
     private readonly SesLocalOptions _options;
-    private readonly IHostApplicationLifetime _lifetime;
-    private readonly long _startTimestamp = Stopwatch.GetTimestamp();
 
     private const int Port = 37780;
 
@@ -34,14 +31,12 @@ public sealed class BrowserExtensionListener : BackgroundService
         ILocalDbService db,
         IAuthService auth,
         ILogger<BrowserExtensionListener> logger,
-        IOptions<SesLocalOptions> options,
-        IHostApplicationLifetime lifetime)
+        IOptions<SesLocalOptions> options)
     {
         _db       = db;
         _auth     = auth;
         _logger   = logger;
         _options  = options.Value;
-        _lifetime = lifetime;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -111,31 +106,6 @@ public sealed class BrowserExtensionListener : BackgroundService
                 return;
             }
 
-            // Daemon status endpoint — used by tray GUI to poll health
-            if (req.HttpMethod == "GET" && req.Url?.AbsolutePath == "/api/status")
-            {
-                await HandleStatusAsync(resp, ct);
-                return;
-            }
-
-            // Sign out — used by tray to clear auth state in daemon
-            if (req.HttpMethod == "POST" && req.Url?.AbsolutePath == "/api/signout")
-            {
-                await _auth.SignOutAsync(ct);
-                resp.StatusCode = 200;
-                await WriteJsonAsync(resp, new { message = "Signed out" });
-                return;
-            }
-
-            // Graceful shutdown — used by tray "Stop Daemon" menu item
-            if (req.HttpMethod == "POST" && req.Url?.AbsolutePath == "/api/shutdown")
-            {
-                resp.StatusCode = 200;
-                await WriteJsonAsync(resp, new { message = "Shutting down" });
-                _lifetime.StopApplication();
-                return;
-            }
-
             // Only accept POST /api/sync/conversations
             if (req.HttpMethod != "POST" || req.Url?.AbsolutePath != "/api/sync/conversations")
             {
@@ -179,29 +149,6 @@ public sealed class BrowserExtensionListener : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Extension listener: request handler error");
-            resp.StatusCode = 500;
-            resp.Close();
-        }
-    }
-
-    private async Task HandleStatusAsync(HttpListenerResponse resp, CancellationToken ct)
-    {
-        try
-        {
-            var state  = await _auth.GetStateAsync(ct);
-            var uptime = Stopwatch.GetElapsedTime(_startTimestamp);
-
-            resp.StatusCode = 200;
-            await WriteJsonAsync(resp, new
-            {
-                authenticated = state.IsAuthenticated,
-                needsReauth   = state.NeedsReauth,
-                uptime        = uptime.ToString(@"d\.hh\:mm\:ss")
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to build status response");
             resp.StatusCode = 500;
             resp.Close();
         }
@@ -299,11 +246,11 @@ public sealed class BrowserExtensionListener : BackgroundService
 
     private static async Task WriteHtmlAsync(HttpListenerResponse resp, string title, string message, string? retryLink)
     {
-        var encodedTitle   = System.Net.WebUtility.HtmlEncode(title);
-        var encodedMessage = System.Net.WebUtility.HtmlEncode(message);
+        var encodedTitle   = WebUtility.HtmlEncode(title);
+        var encodedMessage = WebUtility.HtmlEncode(message);
         var headingColor   = resp.StatusCode == 200 ? "#2e7d32" : "#c62828";
         var retryHtml      = retryLink is not null
-            ? "<a href=\"" + System.Net.WebUtility.HtmlEncode(retryLink) + "\" style=\"color:#1a73e8;text-decoration:none;\">Try again</a>"
+            ? "<a href=\"" + WebUtility.HtmlEncode(retryLink) + "\" style=\"color:#1a73e8;text-decoration:none;\">Try again</a>"
             : "";
 
         var html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"/>"

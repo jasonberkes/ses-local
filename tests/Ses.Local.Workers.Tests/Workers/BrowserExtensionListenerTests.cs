@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -22,9 +21,8 @@ public sealed class BrowserExtensionListenerTests
         auth.Setup(x => x.GetPatAsync(It.IsAny<CancellationToken>())).ReturnsAsync("tm_pat_testtoken");
 
         var opts     = Options.Create(new SesLocalOptions());
-        var lifetime = new Mock<IHostApplicationLifetime>();
         var listener = new BrowserExtensionListener(db.Object, auth.Object,
-            NullLogger<BrowserExtensionListener>.Instance, opts, lifetime.Object);
+            NullLogger<BrowserExtensionListener>.Instance, opts);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         _ = listener.StartAsync(cts.Token);
@@ -72,9 +70,8 @@ public sealed class BrowserExtensionListenerTests
         auth.Setup(x => x.GetPatAsync(It.IsAny<CancellationToken>())).ReturnsAsync("tm_pat_correct");
 
         var opts     = Options.Create(new SesLocalOptions());
-        var lifetime = new Mock<IHostApplicationLifetime>();
         var listener = new BrowserExtensionListener(db.Object, auth.Object,
-            NullLogger<BrowserExtensionListener>.Instance, opts, lifetime.Object);
+            NullLogger<BrowserExtensionListener>.Instance, opts);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         _ = listener.StartAsync(cts.Token);
@@ -90,6 +87,41 @@ public sealed class BrowserExtensionListenerTests
             };
             var resp = await http.SendAsync(req, cts.Token);
             Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        }
+        catch (HttpRequestException) { /* port in use on CI */ }
+
+        await listener.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Listener_IpcEndpoints_Return404()
+    {
+        var db   = new Mock<ILocalDbService>();
+        var auth = new Mock<IAuthService>();
+
+        var opts     = Options.Create(new SesLocalOptions());
+        var listener = new BrowserExtensionListener(db.Object, auth.Object,
+            NullLogger<BrowserExtensionListener>.Instance, opts);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        _ = listener.StartAsync(cts.Token);
+        await Task.Delay(200);
+
+        try
+        {
+            using var http = new HttpClient();
+
+            // /api/status should no longer be served here (moved to UDS)
+            var statusResp = await http.GetAsync("http://localhost:37780/api/status", cts.Token);
+            Assert.Equal(HttpStatusCode.NotFound, statusResp.StatusCode);
+
+            // /api/signout should no longer be served here
+            var signoutResp = await http.PostAsync("http://localhost:37780/api/signout", null, cts.Token);
+            Assert.Equal(HttpStatusCode.NotFound, signoutResp.StatusCode);
+
+            // /api/shutdown should no longer be served here
+            var shutdownResp = await http.PostAsync("http://localhost:37780/api/shutdown", null, cts.Token);
+            Assert.Equal(HttpStatusCode.NotFound, shutdownResp.StatusCode);
         }
         catch (HttpRequestException) { /* port in use on CI */ }
 
