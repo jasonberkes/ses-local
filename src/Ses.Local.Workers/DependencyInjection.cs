@@ -150,6 +150,9 @@ public static class DependencyInjection
         services.AddSingleton<IObservationCompressor, RuleBasedCompressor>();
         services.AddHostedService<CompressionWorker>();
 
+        // CLAUDE.md auto-generation (WI-982)
+        services.AddSingleton<IClaudeMdGenerator, ClaudeMdGenerator>();
+
         return services;
     }
 }

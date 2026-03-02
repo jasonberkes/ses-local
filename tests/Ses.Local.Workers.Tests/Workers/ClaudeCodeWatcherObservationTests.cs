@@ -70,7 +70,11 @@ public sealed class ClaudeCodeWatcherObservationTests : IDisposable
           })
           .Returns(Task.CompletedTask);
 
-        var watcher = new ClaudeCodeWatcher(db.Object, NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+        var generator = new Mock<IClaudeMdGenerator>();
+        generator.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                 .Returns(Task.CompletedTask);
+
+        var watcher = new ClaudeCodeWatcher(db.Object, generator.Object, NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
         return (db, watcher);
     }
 
@@ -372,7 +376,10 @@ public sealed class ClaudeCodeWatcherObservationTests : IDisposable
               It.IsAny<IEnumerable<(long, long)>>(), It.IsAny<CancellationToken>()))
           .Returns(Task.CompletedTask);
 
-        var watcher = new ClaudeCodeWatcher(db.Object, NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+        var generator = new Mock<IClaudeMdGenerator>();
+        generator.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                 .Returns(Task.CompletedTask);
+        var watcher = new ClaudeCodeWatcher(db.Object, generator.Object, NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
 
         var jsonl = """
             {"type":"user","message":{"role":"user","content":"Write a file"},"timestamp":"2026-01-01T00:00:00Z","cwd":"/myproject"}

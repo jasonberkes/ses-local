@@ -7,6 +7,7 @@ using Ses.Local.Core.Models;
 using Ses.Local.Core.Options;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Ses.Local.Workers.Services;
 
 namespace Ses.Local.Workers.Workers;
 
@@ -21,6 +22,7 @@ namespace Ses.Local.Workers.Workers;
 public sealed class ClaudeCodeWatcher : BackgroundService
 {
     private readonly ILocalDbService _db;
+    private readonly IClaudeMdGenerator _claudeMdGenerator;
     private readonly ILogger<ClaudeCodeWatcher> _logger;
     private readonly SesLocalOptions _options;
 
@@ -35,12 +37,14 @@ public sealed class ClaudeCodeWatcher : BackgroundService
 
     public ClaudeCodeWatcher(
         ILocalDbService db,
+        IClaudeMdGenerator claudeMdGenerator,
         ILogger<ClaudeCodeWatcher> logger,
         IOptions<SesLocalOptions> options)
     {
-        _db      = db;
-        _logger  = logger;
-        _options = options.Value;
+        _db                 = db;
+        _claudeMdGenerator  = claudeMdGenerator;
+        _logger             = logger;
+        _options            = options.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -256,6 +260,10 @@ public sealed class ClaudeCodeWatcher : BackgroundService
             var parentUpdates = ResolveParentLinks(newObservations, toolUseClaudeIds, pendingParentRefs);
             if (parentUpdates.Count > 0)
                 await _db.UpdateObservationParentsAsync(parentUpdates, ct);
+
+            // Regenerate CLAUDE.md for this project so the next session starts with context
+            if (!string.IsNullOrEmpty(cwd))
+                _ = _claudeMdGenerator.GenerateAsync(cwd, ct);
         }
 
         _logger.LogDebug("Processed {MsgCount} messages, {ObsCount} observations from {File}",

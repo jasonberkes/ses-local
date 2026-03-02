@@ -281,6 +281,58 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         return results;
     }
 
+    public async Task<IReadOnlyList<ConversationSession>> GetRecentSessionsByProjectNameAsync(
+        string projectName, DateTime since, int limit = 50, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash
+            FROM conv_sessions
+            WHERE source = 'ClaudeCode'
+              AND title LIKE @prefix
+              AND updated_at >= @since
+            ORDER BY updated_at DESC
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@prefix", projectName + "/%");
+        cmd.Parameters.AddWithValue("@since", since.ToString("O"));
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var results = new List<ConversationSession>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapSession(reader));
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<ConversationObservation>> GetRecentObservationsForSessionsAsync(
+        IEnumerable<long> sessionIds, DateTime since, CancellationToken ct = default)
+    {
+        var ids = string.Join(",", sessionIds);
+        if (string.IsNullOrEmpty(ids)) return [];
+
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            SELECT id, session_id, observation_type, tool_name, file_path, content, token_count,
+                   sequence_number, parent_observation_id, created_at
+            FROM conv_observations
+            WHERE session_id IN ({ids})
+              AND created_at >= @since
+            ORDER BY created_at DESC
+            """;
+        cmd.Parameters.AddWithValue("@since", since.ToString("O"));
+
+        var results = new List<ConversationObservation>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapObservation(reader));
+
+        return results;
+    }
+
     public async Task UpdateObservationParentsAsync(IEnumerable<(long observationId, long parentId)> updates, CancellationToken ct = default)
     {
         var conn = await GetConnectionAsync(ct);
