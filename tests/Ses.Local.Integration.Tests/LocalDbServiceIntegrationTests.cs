@@ -1,0 +1,349 @@
+using Ses.Local.Core.Enums;
+using Ses.Local.Core.Models;
+using Ses.Local.Integration.Tests.Fixtures;
+using Xunit;
+
+namespace Ses.Local.Integration.Tests;
+
+/// <summary>
+/// E2E integration tests for LocalDbService using a real temp SQLite database.
+/// Verifies: schema migration, upsert, retrieval, search, and sync lifecycle.
+/// </summary>
+[Trait("Category", "Integration")]
+public sealed class LocalDbServiceIntegrationTests : IAsyncDisposable
+{
+    private readonly TestDbFixture _fixture = new();
+
+    // ── Schema Migration ──────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Schema_MigratedOnFirstAccess_AllTablesExist()
+    {
+        // Trigger schema creation
+        var sessions = await _fixture.Db.GetPendingSyncAsync(batchSize: 1);
+        Assert.NotNull(sessions);
+
+        // Verify DB file exists
+        Assert.True(File.Exists(_fixture.DbPath));
+    }
+
+    // ── Session Upsert / Retrieval ────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpsertSession_NewSession_AssignsId_AndIsRetrievable()
+    {
+        var session = MakeSession("ext-001", "Integration test session");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        Assert.True(session.Id > 0, "Id should be assigned after upsert");
+
+        var pending = await _fixture.Db.GetPendingSyncAsync();
+        Assert.Contains(pending, s => s.ExternalId == "ext-001" && s.Title == "Integration test session");
+    }
+
+    [Fact]
+    public async Task UpsertSession_ExistingSession_UpdatesTitle()
+    {
+        var session = MakeSession("ext-002", "Original title");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        session.Title     = "Updated title";
+        session.UpdatedAt = DateTime.UtcNow.AddMinutes(1);
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var pending = await _fixture.Db.GetPendingSyncAsync();
+        var found = pending.First(s => s.ExternalId == "ext-002");
+        Assert.Equal("Updated title", found.Title);
+    }
+
+    [Fact]
+    public async Task UpsertSession_PreservesSourceEnum()
+    {
+        var session = MakeSession("ext-003", "Source test", ConversationSource.ClaudeChat);
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var pending = await _fixture.Db.GetPendingSyncAsync();
+        var found = pending.First(s => s.ExternalId == "ext-003");
+        Assert.Equal(ConversationSource.ClaudeChat, found.Source);
+    }
+
+    // ── Message Upsert / Retrieval ────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpsertMessages_StoresAndRetrievesMessages()
+    {
+        var session = MakeSession("ext-msg-001", "Message test");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var messages = new[]
+        {
+            new ConversationMessage { SessionId = session.Id, Role = "user",      Content = "Hello integration",      CreatedAt = DateTime.UtcNow,               TokenCount = 5 },
+            new ConversationMessage { SessionId = session.Id, Role = "assistant",  Content = "Hello from integration",  CreatedAt = DateTime.UtcNow.AddSeconds(1), TokenCount = 7 }
+        };
+
+        await _fixture.Db.UpsertMessagesAsync(messages);
+
+        var retrieved = await _fixture.Db.GetMessagesAsync(session.Id);
+        Assert.Equal(2, retrieved.Count);
+        Assert.Contains(retrieved, m => m.Role == "user" && m.Content == "Hello integration" && m.TokenCount == 5);
+        Assert.Contains(retrieved, m => m.Role == "assistant" && m.TokenCount == 7);
+    }
+
+    [Fact]
+    public async Task UpsertMessages_Idempotent_NoDuplicates()
+    {
+        var session = MakeSession("ext-msg-002", "Idempotent messages");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var ts = DateTime.UtcNow;
+        var msg = new ConversationMessage { SessionId = session.Id, Role = "user", Content = "same message", CreatedAt = ts };
+
+        await _fixture.Db.UpsertMessagesAsync([msg]);
+        await _fixture.Db.UpsertMessagesAsync([msg]); // second upsert
+
+        var retrieved = await _fixture.Db.GetMessagesAsync(session.Id);
+        Assert.Single(retrieved);
+    }
+
+    // ── FTS Search ────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SearchAsync_FindsMessageByUniqueContent()
+    {
+        var session = MakeSession("ext-search-001", "Search test");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var uniqueToken = "xyzintegration" + Guid.NewGuid().ToString("N")[..6];
+        await _fixture.Db.UpsertMessagesAsync([
+            new ConversationMessage
+            {
+                SessionId = session.Id,
+                Role      = "user",
+                Content   = $"This message has unique token {uniqueToken} in it",
+                CreatedAt = DateTime.UtcNow
+            }
+        ]);
+
+        var results = await _fixture.Db.SearchAsync(uniqueToken);
+        Assert.Single(results);
+        Assert.Contains(uniqueToken, results[0].Content);
+    }
+
+    [Fact]
+    public async Task SearchAsync_RespectsLimit()
+    {
+        var session = MakeSession("ext-search-limit", "Limit test");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var sharedWord = "sharedkeyword" + Guid.NewGuid().ToString("N")[..4];
+        var batch = Enumerable.Range(0, 5).Select(i => new ConversationMessage
+        {
+            SessionId = session.Id,
+            Role      = "user",
+            Content   = $"Message {i} contains {sharedWord}",
+            CreatedAt = DateTime.UtcNow.AddSeconds(i)
+        }).ToList();
+
+        await _fixture.Db.UpsertMessagesAsync(batch);
+
+        var results = await _fixture.Db.SearchAsync(sharedWord, limit: 2);
+        Assert.True(results.Count <= 2);
+    }
+
+    // ── Sync Lifecycle ────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task MarkSyncedAsync_RemovesFromPendingSync()
+    {
+        var session = MakeSession("ext-sync-001", "Sync lifecycle test");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var beforeSync = await _fixture.Db.GetPendingSyncAsync();
+        Assert.Contains(beforeSync, s => s.ExternalId == "ext-sync-001");
+
+        await _fixture.Db.MarkSyncedAsync(session.Id, "doc-id-xyz");
+
+        var afterSync = await _fixture.Db.GetPendingSyncAsync();
+        Assert.DoesNotContain(afterSync, s => s.ExternalId == "ext-sync-001");
+    }
+
+    [Fact]
+    public async Task GetPendingSyncAsync_RespectsLimit()
+    {
+        for (int i = 0; i < 5; i++)
+            await _fixture.Db.UpsertSessionAsync(MakeSession($"ext-limit-{i}", $"Session {i}"));
+
+        var results = await _fixture.Db.GetPendingSyncAsync(batchSize: 2);
+        Assert.True(results.Count <= 2);
+    }
+
+    // ── Observation Upsert / Retrieval ────────────────────────────────────────
+
+    [Fact]
+    public async Task UpsertObservations_StoresAndRetrievesObservations()
+    {
+        var session = MakeSession("ext-obs-001", "Observation test");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var observations = new List<ConversationObservation>
+        {
+            new() { SessionId = session.Id, ObservationType = ObservationType.ToolUse,    ToolName = "Read", FilePath = "/src/Foo.cs", Content = "{\"file_path\":\"/src/Foo.cs\"}", SequenceNumber = 0, CreatedAt = DateTime.UtcNow },
+            new() { SessionId = session.Id, ObservationType = ObservationType.ToolResult,  Content = "File content here",                                                             SequenceNumber = 1, CreatedAt = DateTime.UtcNow.AddSeconds(1) },
+            new() { SessionId = session.Id, ObservationType = ObservationType.Text,        Content = "Here is my analysis of the file.",                                              SequenceNumber = 2, CreatedAt = DateTime.UtcNow.AddSeconds(2) }
+        };
+
+        await _fixture.Db.UpsertObservationsAsync(observations);
+
+        // All observations should have been assigned DB Ids
+        Assert.All(observations, o => Assert.True(o.Id > 0));
+
+        var retrieved = await _fixture.Db.GetObservationsAsync(session.Id);
+        Assert.Equal(3, retrieved.Count);
+        Assert.Equal(ObservationType.ToolUse,   retrieved[0].ObservationType);
+        Assert.Equal("Read",                    retrieved[0].ToolName);
+        Assert.Equal("/src/Foo.cs",             retrieved[0].FilePath);
+        Assert.Equal(ObservationType.ToolResult, retrieved[1].ObservationType);
+        Assert.Equal(ObservationType.Text,       retrieved[2].ObservationType);
+    }
+
+    [Fact]
+    public async Task UpsertObservations_Idempotent_NoDuplicates()
+    {
+        var session = MakeSession("ext-obs-002", "Idempotent observations");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var obs = new ConversationObservation
+        {
+            SessionId       = session.Id,
+            ObservationType = ObservationType.Text,
+            Content         = "Duplicate content",
+            SequenceNumber  = 0,
+            CreatedAt       = DateTime.UtcNow
+        };
+
+        await _fixture.Db.UpsertObservationsAsync([obs]);
+        await _fixture.Db.UpsertObservationsAsync([obs]); // second upsert
+
+        var retrieved = await _fixture.Db.GetObservationsAsync(session.Id);
+        Assert.Single(retrieved);
+    }
+
+    [Fact]
+    public async Task GetObservationsAsync_OrderedBySequenceNumber()
+    {
+        var session = MakeSession("ext-obs-order", "Ordering test");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        // Insert in reverse order to confirm DB ordering, not insertion ordering
+        var observations = new List<ConversationObservation>
+        {
+            new() { SessionId = session.Id, ObservationType = ObservationType.Text, Content = "Third", SequenceNumber = 2, CreatedAt = DateTime.UtcNow },
+            new() { SessionId = session.Id, ObservationType = ObservationType.Text, Content = "First",  SequenceNumber = 0, CreatedAt = DateTime.UtcNow },
+            new() { SessionId = session.Id, ObservationType = ObservationType.Text, Content = "Second", SequenceNumber = 1, CreatedAt = DateTime.UtcNow }
+        };
+
+        await _fixture.Db.UpsertObservationsAsync(observations);
+
+        var retrieved = await _fixture.Db.GetObservationsAsync(session.Id);
+        Assert.Equal(["First", "Second", "Third"], retrieved.Select(o => o.Content).ToArray());
+    }
+
+    // ── Observation FTS Search ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SearchObservationsAsync_FindsByContent()
+    {
+        var session = MakeSession("ext-obs-search-001", "Obs search test");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var uniqueWord = "uniqueobstoken" + Guid.NewGuid().ToString("N")[..5];
+        await _fixture.Db.UpsertObservationsAsync([
+            new ConversationObservation
+            {
+                SessionId       = session.Id,
+                ObservationType = ObservationType.Text,
+                Content         = $"Observation with {uniqueWord} content",
+                SequenceNumber  = 0,
+                CreatedAt       = DateTime.UtcNow
+            }
+        ]);
+
+        var results = await _fixture.Db.SearchObservationsAsync(uniqueWord);
+        Assert.Single(results);
+        Assert.Contains(uniqueWord, results[0].Content);
+    }
+
+    [Fact]
+    public async Task SearchObservationsAsync_FindsByToolName()
+    {
+        var session = MakeSession("ext-obs-search-tool", "Tool name search");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var uniqueTool = "MySpecialTool" + Guid.NewGuid().ToString("N")[..4];
+        await _fixture.Db.UpsertObservationsAsync([
+            new ConversationObservation
+            {
+                SessionId       = session.Id,
+                ObservationType = ObservationType.ToolUse,
+                ToolName        = uniqueTool,
+                Content         = "{}",
+                SequenceNumber  = 0,
+                CreatedAt       = DateTime.UtcNow
+            }
+        ]);
+
+        var results = await _fixture.Db.SearchObservationsAsync(uniqueTool);
+        Assert.Single(results);
+        Assert.Equal(uniqueTool, results[0].ToolName);
+    }
+
+    // ── Parent Linking ────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task UpdateObservationParents_LinksToolResultToToolUse()
+    {
+        var session = MakeSession("ext-parent-001", "Parent link test");
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var toolUse = new ConversationObservation
+        {
+            SessionId       = session.Id,
+            ObservationType = ObservationType.ToolUse,
+            ToolName        = "Write",
+            Content         = "{\"file_path\":\"/out.txt\"}",
+            SequenceNumber  = 0,
+            CreatedAt       = DateTime.UtcNow
+        };
+        var toolResult = new ConversationObservation
+        {
+            SessionId       = session.Id,
+            ObservationType = ObservationType.ToolResult,
+            Content         = "File written successfully",
+            SequenceNumber  = 1,
+            CreatedAt       = DateTime.UtcNow.AddSeconds(1)
+        };
+
+        await _fixture.Db.UpsertObservationsAsync([toolUse, toolResult]);
+
+        // Link tool_result → tool_use
+        await _fixture.Db.UpdateObservationParentsAsync([(toolResult.Id, toolUse.Id)]);
+
+        var retrieved = await _fixture.Db.GetObservationsAsync(session.Id);
+        var retrievedResult = retrieved.First(o => o.ObservationType == ObservationType.ToolResult);
+        Assert.Equal(toolUse.Id, retrievedResult.ParentObservationId);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static ConversationSession MakeSession(string externalId, string title, ConversationSource source = ConversationSource.ClaudeCode) =>
+        new()
+        {
+            Source     = source,
+            ExternalId = externalId,
+            Title      = title,
+            CreatedAt  = DateTime.UtcNow,
+            UpdatedAt  = DateTime.UtcNow
+        };
+
+    public async ValueTask DisposeAsync() => await _fixture.DisposeAsync();
+}

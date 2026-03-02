@@ -29,6 +29,14 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         _dbPath = Path.Combine(sesDir, "local.db");
     }
 
+    /// <summary>Internal constructor for integration tests — uses an explicit db path.</summary>
+    internal LocalDbService(string dbPath, ILogger<LocalDbService> logger)
+    {
+        _logger = logger;
+        _dbPath = dbPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
+    }
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     public async Task UpsertSessionAsync(ConversationSession session, CancellationToken ct = default)
