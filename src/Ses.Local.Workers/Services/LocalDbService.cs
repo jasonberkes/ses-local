@@ -328,6 +328,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             await ApplyMigration2Async(conn, ct);
             await SetUserVersionAsync(conn, 2, ct);
         }
+
+        if (version < 3)
+        {
+            await ApplyMigration3Async(conn, ct);
+            await SetUserVersionAsync(conn, 3, ct);
+        }
     }
 
     private static async Task ApplyMigration1Async(SqliteConnection conn, CancellationToken ct)
@@ -481,6 +487,181 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             """, ct);
     }
 
+    private static async Task ApplyMigration3Async(SqliteConnection conn, CancellationToken ct)
+    {
+        // conv_session_summaries — one summary per session, produced by the compression pipeline
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE IF NOT EXISTS conv_session_summaries (
+                id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id           INTEGER NOT NULL REFERENCES conv_sessions(id) ON DELETE CASCADE,
+                category             TEXT NOT NULL DEFAULT 'unknown',
+                narrative            TEXT NOT NULL,
+                concepts             TEXT NULL,
+                file_references      TEXT NULL,
+                git_commit_messages  TEXT NULL,
+                tests_run            INTEGER NULL,
+                tests_passed         INTEGER NULL,
+                tests_failed         INTEGER NULL,
+                error_count          INTEGER NOT NULL DEFAULT 0,
+                tool_use_count       INTEGER NOT NULL DEFAULT 0,
+                compression_layer    INTEGER NOT NULL DEFAULT 1,
+                created_at           TEXT NOT NULL,
+                UNIQUE(session_id)
+            )
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_session_summaries_session ON conv_session_summaries(session_id)", ct);
+
+        // FTS5 virtual table — searches narrative, concepts, file_references, and category
+        await ExecuteNonQueryAsync(conn, """
+            CREATE VIRTUAL TABLE IF NOT EXISTS conv_session_summaries_fts
+            USING fts5(narrative, concepts, file_references, category, content='conv_session_summaries', content_rowid='id')
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TRIGGER IF NOT EXISTS conv_session_summaries_ai AFTER INSERT ON conv_session_summaries BEGIN
+                INSERT INTO conv_session_summaries_fts(rowid, narrative, concepts, file_references, category)
+                VALUES (new.id, new.narrative, COALESCE(new.concepts, ''), COALESCE(new.file_references, ''), new.category);
+            END
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TRIGGER IF NOT EXISTS conv_session_summaries_ad AFTER DELETE ON conv_session_summaries BEGIN
+                INSERT INTO conv_session_summaries_fts(conv_session_summaries_fts, rowid, narrative, concepts, file_references, category)
+                VALUES ('delete', old.id, old.narrative, COALESCE(old.concepts, ''), COALESCE(old.file_references, ''), old.category);
+            END
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TRIGGER IF NOT EXISTS conv_session_summaries_au AFTER UPDATE ON conv_session_summaries BEGIN
+                INSERT INTO conv_session_summaries_fts(conv_session_summaries_fts, rowid, narrative, concepts, file_references, category)
+                VALUES ('delete', old.id, old.narrative, COALESCE(old.concepts, ''), COALESCE(old.file_references, ''), old.category);
+                INSERT INTO conv_session_summaries_fts(rowid, narrative, concepts, file_references, category)
+                VALUES (new.id, new.narrative, COALESCE(new.concepts, ''), COALESCE(new.file_references, ''), new.category);
+            END
+            """, ct);
+    }
+
+    // ── Session summary methods ───────────────────────────────────────────────
+
+    public async Task UpsertSessionSummaryAsync(SessionSummary summary, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO conv_session_summaries
+                (session_id, category, narrative, concepts, file_references, git_commit_messages,
+                 tests_run, tests_passed, tests_failed, error_count, tool_use_count, compression_layer, created_at)
+            VALUES
+                (@session_id, @category, @narrative, @concepts, @file_references, @git_commit_messages,
+                 @tests_run, @tests_passed, @tests_failed, @error_count, @tool_use_count, @compression_layer, @created_at)
+            ON CONFLICT(session_id) DO UPDATE SET
+                category             = excluded.category,
+                narrative            = excluded.narrative,
+                concepts             = excluded.concepts,
+                file_references      = excluded.file_references,
+                git_commit_messages  = excluded.git_commit_messages,
+                tests_run            = excluded.tests_run,
+                tests_passed         = excluded.tests_passed,
+                tests_failed         = excluded.tests_failed,
+                error_count          = excluded.error_count,
+                tool_use_count       = excluded.tool_use_count,
+                compression_layer    = excluded.compression_layer,
+                created_at           = excluded.created_at
+            """;
+        cmd.Parameters.AddWithValue("@session_id",          summary.SessionId);
+        cmd.Parameters.AddWithValue("@category",            summary.Category);
+        cmd.Parameters.AddWithValue("@narrative",           summary.Narrative);
+        cmd.Parameters.AddWithValue("@concepts",            summary.Concepts ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@file_references",     summary.FileReferences ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@git_commit_messages", summary.GitCommitMessages ?? (object)DBNull.Value);
+        cmd.Parameters.AddWithValue("@tests_run",           summary.TestsRun.HasValue ? (object)(summary.TestsRun.Value ? 1 : 0) : DBNull.Value);
+        cmd.Parameters.AddWithValue("@tests_passed",        summary.TestsPassed.HasValue ? (object)summary.TestsPassed.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@tests_failed",        summary.TestsFailed.HasValue ? (object)summary.TestsFailed.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@error_count",         summary.ErrorCount);
+        cmd.Parameters.AddWithValue("@tool_use_count",      summary.ToolUseCount);
+        cmd.Parameters.AddWithValue("@compression_layer",   summary.CompressionLayer);
+        cmd.Parameters.AddWithValue("@created_at",          summary.CreatedAt.ToString("O"));
+        await cmd.ExecuteNonQueryAsync(ct);
+
+        // Sync back DB-assigned Id
+        if (summary.Id == 0)
+        {
+            await using var idCmd = conn.CreateCommand();
+            idCmd.CommandText = "SELECT id FROM conv_session_summaries WHERE session_id = @session_id";
+            idCmd.Parameters.AddWithValue("@session_id", summary.SessionId);
+            var result = await idCmd.ExecuteScalarAsync(ct);
+            if (result is long id)
+                summary.Id = id;
+        }
+    }
+
+    public async Task<SessionSummary?> GetSessionSummaryAsync(long sessionId, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, session_id, category, narrative, concepts, file_references, git_commit_messages,
+                   tests_run, tests_passed, tests_failed, error_count, tool_use_count, compression_layer, created_at
+            FROM conv_session_summaries
+            WHERE session_id = @session_id
+            """;
+        cmd.Parameters.AddWithValue("@session_id", sessionId);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (await reader.ReadAsync(ct))
+            return MapSummary(reader);
+
+        return null;
+    }
+
+    public async Task<IReadOnlyList<SessionSummary>> SearchSummariesAsync(string query, int limit = 10, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT s.id, s.session_id, s.category, s.narrative, s.concepts, s.file_references,
+                   s.git_commit_messages, s.tests_run, s.tests_passed, s.tests_failed,
+                   s.error_count, s.tool_use_count, s.compression_layer, s.created_at
+            FROM conv_session_summaries_fts fts
+            JOIN conv_session_summaries s ON s.id = fts.rowid
+            WHERE conv_session_summaries_fts MATCH @query
+            ORDER BY rank
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@query", query);
+        cmd.Parameters.AddWithValue("@limit", limit);
+
+        var results = new List<SessionSummary>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapSummary(reader));
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<long>> GetSessionsWithoutSummaryAsync(int batchSize = 10, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT DISTINCT o.session_id
+            FROM conv_observations o
+            WHERE NOT EXISTS (
+                SELECT 1 FROM conv_session_summaries css WHERE css.session_id = o.session_id
+            )
+            LIMIT @batch
+            """;
+        cmd.Parameters.AddWithValue("@batch", batchSize);
+
+        var results = new List<long>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(reader.GetInt64(0));
+
+        return results;
+    }
+
     // ── Connection management ─────────────────────────────────────────────────
 
     private async Task<SqliteConnection> GetConnectionAsync(CancellationToken ct)
@@ -551,6 +732,24 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         Content    = r.GetString(3),
         CreatedAt  = DateTime.Parse(r.GetString(4)),
         TokenCount = r.IsDBNull(5) ? null : r.GetInt32(5)
+    };
+
+    private static SessionSummary MapSummary(SqliteDataReader r) => new()
+    {
+        Id                 = r.GetInt64(0),
+        SessionId          = r.GetInt64(1),
+        Category           = r.GetString(2),
+        Narrative          = r.GetString(3),
+        Concepts           = r.IsDBNull(4) ? null : r.GetString(4),
+        FileReferences     = r.IsDBNull(5) ? null : r.GetString(5),
+        GitCommitMessages  = r.IsDBNull(6) ? null : r.GetString(6),
+        TestsRun           = r.IsDBNull(7) ? null : r.GetInt64(7) == 1,
+        TestsPassed        = r.IsDBNull(8) ? null : r.GetInt32(8),
+        TestsFailed        = r.IsDBNull(9) ? null : r.GetInt32(9),
+        ErrorCount         = r.GetInt32(10),
+        ToolUseCount       = r.GetInt32(11),
+        CompressionLayer   = r.GetInt32(12),
+        CreatedAt          = DateTime.Parse(r.GetString(13))
     };
 
     private static ConversationObservation MapObservation(SqliteDataReader r) => new()

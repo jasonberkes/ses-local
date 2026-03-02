@@ -32,4 +32,23 @@ public interface ILocalDbService
     /// Called as a post-upsert step to complete parent linking within a batch.
     /// </summary>
     Task UpdateObservationParentsAsync(IEnumerable<(long observationId, long parentId)> updates, CancellationToken ct = default);
+
+    /// <summary>
+    /// Inserts or replaces the session summary for a session.
+    /// Conflict key: session_id (one summary per session at any given compression layer).
+    /// Syncs back the DB-assigned Id on the summary.
+    /// </summary>
+    Task UpsertSessionSummaryAsync(SessionSummary summary, CancellationToken ct = default);
+
+    /// <summary>Returns the summary for a session, or null if none exists yet.</summary>
+    Task<SessionSummary?> GetSessionSummaryAsync(long sessionId, CancellationToken ct = default);
+
+    /// <summary>Full-text search across summary narrative, concepts, file references, and category.</summary>
+    Task<IReadOnlyList<SessionSummary>> SearchSummariesAsync(string query, int limit = 10, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns session IDs that have observations but no summary yet, up to <paramref name="batchSize"/> items.
+    /// Used by the compression worker to find work.
+    /// </summary>
+    Task<IReadOnlyList<long>> GetSessionsWithoutSummaryAsync(int batchSize = 10, CancellationToken ct = default);
 }
