@@ -6,8 +6,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningLevel>4</WarningLevel>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <NoWarn>$(NoWarn);1591;S1172;S6966;S3267;S6610;S1751;S2365;S1075;S6608;S6964;S2925;S1066;S6580;S5856;S4144;S2219;S1450;S125;S3928;S2930;S2139</NoWarn>
     <Authors>Super Easy Software</Authors>
     <Company>Super Easy Software</Company>
     <Product>Super Easy Software Local</Product>
