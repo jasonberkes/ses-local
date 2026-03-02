@@ -12,6 +12,30 @@ public sealed class SesLocalOptions
     /// <summary>Identity server base URL.</summary>
     public string IdentityBaseUrl { get; init; } = "https://identity.tm.supereasysoftware.com";
 
+    /// <summary>TaskMaster DocumentService base URL.</summary>
+    public string DocumentServiceBaseUrl { get; init; } =
+        "https://tm-documentservice-prod-eus2.redhill-040b1667.eastus2.azurecontainerapps.io";
+
+    /// <summary>Cloud memory service base URL.</summary>
+    public string MemoryBaseUrl { get; init; } = "https://memory.tm.supereasysoftware.com";
+
+    /// <summary>Claude.ai web app base URL (used for session sync).</summary>
+    public string ClaudeAiBaseUrl { get; init; } = "https://claude.ai";
+
+    /// <summary>ses-mcp auto-update manifest URL.</summary>
+    public string SesMcpManifestUrl { get; init; } =
+        "https://tmprodeus2data.blob.core.windows.net/artifacts/ses-mcp/latest.json";
+
+    /// <summary>ses-local auto-update manifest URL.</summary>
+    public string SesLocalManifestUrl { get; init; } =
+        "https://tmprodeus2data.blob.core.windows.net/artifacts/ses-local/latest.json";
+
+    /// <summary>ses-cloud MCP proxy URL.</summary>
+    public string CloudMcpUrl { get; init; } = "https://mcp.tm.supereasysoftware.com/mcp";
+
+    /// <summary>Documentation site base URL.</summary>
+    public string DocsBaseUrl { get; init; } = "https://docs.supereasysoftware.com";
+
     /// <summary>Enable Claude Code JSONL session watcher. Requires developer scope.</summary>
     public bool EnableClaudeCodeSync { get; set; } = true;
 

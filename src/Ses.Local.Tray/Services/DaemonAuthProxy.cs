@@ -1,7 +1,9 @@
 using System.Net.Http.Json;
 using System.Net.Sockets;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 using Ses.Local.Core.Services;
 
 namespace Ses.Local.Tray.Services;
@@ -13,8 +15,9 @@ namespace Ses.Local.Tray.Services;
 public sealed class DaemonAuthProxy : IAuthService, IDisposable
 {
     private readonly HttpClient _http;
+    private readonly string _loginUrl;
 
-    public DaemonAuthProxy()
+    public DaemonAuthProxy(IOptions<SesLocalOptions> options)
     {
         var sockPath = DaemonSocketPath.GetPath();
         var handler = new SocketsHttpHandler
@@ -34,6 +37,7 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
             BaseAddress = new Uri("http://ses-local-daemon"),
             Timeout     = TimeSpan.FromSeconds(5)
         };
+        _loginUrl = options.Value.IdentityBaseUrl.TrimEnd('/') + "/api/v1/install/login?reauth=true";
     }
 
     public async Task<SesAuthState> GetStateAsync(CancellationToken ct = default)
@@ -97,11 +101,10 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
 
     public Task TriggerReauthAsync(CancellationToken ct = default)
     {
-        var url = "https://identity.tm.supereasysoftware.com/api/v1/install/login?reauth=true";
         if (OperatingSystem.IsMacOS())
-            System.Diagnostics.Process.Start("open", url);
+            System.Diagnostics.Process.Start("open", _loginUrl);
         else if (OperatingSystem.IsWindows())
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_loginUrl) { UseShellExecute = true });
         return Task.CompletedTask;
     }
 

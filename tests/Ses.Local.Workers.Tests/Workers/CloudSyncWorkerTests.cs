@@ -1,7 +1,9 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 using Ses.Local.Workers.Services;
 using Ses.Local.Workers.Workers;
 using Xunit;
@@ -19,8 +21,8 @@ public sealed class CloudSyncWorkerTests
 
         var worker = new CloudSyncWorker(
             db.Object, auth.Object,
-            new DocumentServiceUploader(NullLogger<DocumentServiceUploader>.Instance),
-            new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance),
+            new DocumentServiceUploader(NullLogger<DocumentServiceUploader>.Instance, Options.Create(new SesLocalOptions())),
+            new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance, Options.Create(new SesLocalOptions())),
             NullLogger<CloudSyncWorker>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
@@ -41,8 +43,8 @@ public sealed class CloudSyncWorkerTests
 
         var worker = new CloudSyncWorker(
             db.Object, auth.Object,
-            new DocumentServiceUploader(NullLogger<DocumentServiceUploader>.Instance),
-            new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance),
+            new DocumentServiceUploader(NullLogger<DocumentServiceUploader>.Instance, Options.Create(new SesLocalOptions())),
+            new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance, Options.Create(new SesLocalOptions())),
             NullLogger<CloudSyncWorker>.Instance);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
@@ -52,7 +54,7 @@ public sealed class CloudSyncWorkerTests
     [Fact]
     public async Task DocumentServiceUploader_WithInvalidEndpoint_ReturnsNull()
     {
-        var uploader = new DocumentServiceUploader(NullLogger<DocumentServiceUploader>.Instance);
+        var uploader = new DocumentServiceUploader(NullLogger<DocumentServiceUploader>.Instance, Options.Create(new SesLocalOptions()));
         var session  = new ConversationSession { Id = 1, Title = "Test", ExternalId = "uuid-1" };
         var messages = Array.Empty<ConversationMessage>();
 
@@ -64,7 +66,7 @@ public sealed class CloudSyncWorkerTests
     [Fact]
     public async Task CloudMemoryRetainer_WithEmptyMessages_ReturnsTrue()
     {
-        var retainer = new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance);
+        var retainer = new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance, Options.Create(new SesLocalOptions()));
         var session  = new ConversationSession { Id = 1, Title = "Test", ExternalId = "uuid-1" };
 
         // Empty messages = nothing to retain = success
@@ -75,7 +77,7 @@ public sealed class CloudSyncWorkerTests
     [Fact]
     public async Task CloudMemoryRetainer_WithNetworkError_ReturnsTrueGracefully()
     {
-        var retainer = new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance);
+        var retainer = new CloudMemoryRetainer(NullLogger<CloudMemoryRetainer>.Instance, Options.Create(new SesLocalOptions()));
         var session  = new ConversationSession { Id = 1, Title = "Test", ExternalId = "uuid-1" };
         var messages = new ConversationMessage[]
         {

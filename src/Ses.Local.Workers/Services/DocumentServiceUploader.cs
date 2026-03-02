@@ -3,7 +3,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 
 namespace Ses.Local.Workers.Services;
 
@@ -14,8 +16,7 @@ namespace Ses.Local.Workers.Services;
 public sealed class DocumentServiceUploader
 {
     private readonly ILogger<DocumentServiceUploader> _logger;
-    private const string DocServiceUrl =
-        "https://tm-documentservice-prod-eus2.redhill-040b1667.eastus2.azurecontainerapps.io";
+    private readonly string _docServiceUrl;
 
     private const int TranscriptTypeId = 4;
 
@@ -28,8 +29,11 @@ public sealed class DocumentServiceUploader
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    public DocumentServiceUploader(ILogger<DocumentServiceUploader> logger)
-        => _logger = logger;
+    public DocumentServiceUploader(ILogger<DocumentServiceUploader> logger, IOptions<SesLocalOptions> options)
+    {
+        _logger = logger;
+        _docServiceUrl = options.Value.DocumentServiceBaseUrl;
+    }
 
     /// <summary>
     /// Uploads a conversation transcript. Returns the document ID, or null on failure.
@@ -111,11 +115,11 @@ public sealed class DocumentServiceUploader
         return sb.ToString();
     }
 
-    private static HttpClient BuildHttpClient(string pat)
+    private HttpClient BuildHttpClient(string pat)
     {
         var http = new HttpClient
         {
-            BaseAddress = new Uri(DocServiceUrl),
+            BaseAddress = new Uri(_docServiceUrl),
             Timeout     = TimeSpan.FromSeconds(30)
         };
         http.DefaultRequestHeaders.Authorization =

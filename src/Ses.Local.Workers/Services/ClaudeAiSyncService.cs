@@ -1,9 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Enums;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 
 namespace Ses.Local.Workers.Services;
 
@@ -19,16 +21,19 @@ public sealed class ClaudeAiSyncService
     private readonly ClaudeSessionCookieExtractor _cookieExtractor;
     private readonly ILocalDbService _db;
     private readonly ILogger<ClaudeAiSyncService> _logger;
+    private readonly string _claudeAiBaseUrl;
     private bool _initialSyncDone;
 
     public ClaudeAiSyncService(
         ClaudeSessionCookieExtractor cookieExtractor,
         ILocalDbService db,
-        ILogger<ClaudeAiSyncService> logger)
+        ILogger<ClaudeAiSyncService> logger,
+        IOptions<SesLocalOptions> options)
     {
         _cookieExtractor = cookieExtractor;
         _db              = db;
         _logger          = logger;
+        _claudeAiBaseUrl = options.Value.ClaudeAiBaseUrl;
     }
 
     /// <summary>
@@ -46,7 +51,8 @@ public sealed class ClaudeAiSyncService
         }
 
         using var client = new ClaudeAiClient(cookie,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeAiClient>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeAiClient>.Instance,
+            _claudeAiBaseUrl);
 
         try
         {

@@ -222,7 +222,7 @@ public sealed class BrowserExtensionListener : BackgroundService
                 resp.StatusCode = 400;
                 await WriteHtmlAsync(resp, "Authentication Failed",
                     "Missing required tokens. Please try signing in again.",
-                    "https://identity.tm.supereasysoftware.com/api/v1/install/login?reauth=true");
+                    $"{_options.IdentityBaseUrl.TrimEnd('/')}/api/v1/install/login?reauth=true");
                 return;
             }
 
@@ -240,7 +240,7 @@ public sealed class BrowserExtensionListener : BackgroundService
             resp.StatusCode = 500;
             await WriteHtmlAsync(resp, "Authentication Error",
                 "Something went wrong. Please try again.",
-                "https://identity.tm.supereasysoftware.com/api/v1/install/login?reauth=true");
+                $"{_options.IdentityBaseUrl.TrimEnd('/')}/api/v1/install/login?reauth=true");
         }
     }
 

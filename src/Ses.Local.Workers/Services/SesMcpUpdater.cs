@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 
 namespace Ses.Local.Workers.Services;
 
@@ -15,18 +17,21 @@ public sealed class SesMcpUpdater
     private readonly ILogger<SesMcpUpdater> _logger;
     private readonly HttpClient _http;
     private readonly Func<string> _getBinaryPath;
+    private readonly string _manifestUrl;
 
-    private const string ManifestUrl =
+    private const string DefaultManifestUrl =
         "https://tmprodeus2data.blob.core.windows.net/artifacts/ses-mcp/latest.json";
 
-    public SesMcpUpdater(ILogger<SesMcpUpdater> logger, HttpClient http)
-        : this(logger, http, GetSesMcpBinaryPath) { }
+    public SesMcpUpdater(ILogger<SesMcpUpdater> logger, HttpClient http, IOptions<SesLocalOptions> options)
+        : this(logger, http, GetSesMcpBinaryPath, options.Value.SesMcpManifestUrl) { }
 
-    internal SesMcpUpdater(ILogger<SesMcpUpdater> logger, HttpClient http, Func<string> getBinaryPath)
+    internal SesMcpUpdater(ILogger<SesMcpUpdater> logger, HttpClient http, Func<string> getBinaryPath,
+        string manifestUrl = DefaultManifestUrl)
     {
         _logger = logger;
         _http = http;
         _getBinaryPath = getBinaryPath;
+        _manifestUrl = manifestUrl;
     }
 
     public async Task<UpdateResult> CheckAndApplyAsync(CancellationToken ct = default)
@@ -68,7 +73,7 @@ public sealed class SesMcpUpdater
     {
         try
         {
-            var json = await _http.GetStringAsync(ManifestUrl, ct);
+            var json = await _http.GetStringAsync(_manifestUrl, ct);
             return JsonSerializer.Deserialize(json, UpdateManifestJsonContext.Default.UpdateManifest);
         }
         catch (Exception ex)
