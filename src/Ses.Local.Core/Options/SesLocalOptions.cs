@@ -53,4 +53,13 @@ public sealed class SesLocalOptions
 
     /// <summary>Days between online revocation checks. Default: 7.</summary>
     public int LicenseRevocationCheckDays { get; set; } = 7;
+
+    /// <summary>Enable automatic CLAUDE.md generation in project roots after session activity.</summary>
+    public bool EnableClaudeMdGeneration { get; set; } = true;
+
+    /// <summary>Maximum age in days of activity to include in generated CLAUDE.md files.</summary>
+    public int ClaudeMdMaxAgeDays { get; set; } = 7;
+
+    /// <summary>Project paths to exclude from CLAUDE.md generation (substring match).</summary>
+    public IReadOnlyList<string> ClaudeMdExcludePaths { get; set; } = [];
 }

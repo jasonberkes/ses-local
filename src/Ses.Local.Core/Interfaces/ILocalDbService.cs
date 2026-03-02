@@ -63,4 +63,18 @@ public interface ILocalDbService
     /// <paramref name="maxDepth"/> hops and returns all links encountered (BFS).
     /// </summary>
     Task<IReadOnlyList<ObservationLink>> GetCausalChainAsync(long observationId, int maxDepth = 5, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns recent ClaudeCode sessions whose title starts with the given project name prefix
+    /// (format: "{projectName}/"), updated within the specified time window.
+    /// Used by ClaudeMdGenerator to find sessions belonging to a project directory.
+    /// </summary>
+    Task<IReadOnlyList<ConversationSession>> GetRecentSessionsByProjectNameAsync(
+        string projectName, DateTime since, int limit = 50, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns recent observations for the given sessions, ordered by created_at descending.
+    /// </summary>
+    Task<IReadOnlyList<ConversationObservation>> GetRecentObservationsForSessionsAsync(
+        IEnumerable<long> sessionIds, DateTime since, CancellationToken ct = default);
 }
