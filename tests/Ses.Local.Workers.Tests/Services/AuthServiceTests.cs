@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
+using Ses.Local.Core.Options;
 using Ses.Local.Workers.Services;
 using Xunit;
 
@@ -13,7 +15,8 @@ public sealed class AuthServiceTests
     {
         keychain ??= new InMemoryCredentialStore();
         identity ??= BuildIdentityClient(null);
-        return new AuthService(keychain, identity, NullLogger<AuthService>.Instance);
+        return new AuthService(keychain, identity, NullLogger<AuthService>.Instance,
+            Options.Create(new SesLocalOptions()));
     }
 
     private static IdentityClient BuildIdentityClient(RefreshResponse? refreshResponse)
@@ -100,7 +103,8 @@ public sealed class AuthServiceTests
             DateTime.UtcNow.AddDays(90));
 
         var identity = BuildIdentityClient(refreshResponse);
-        var sut      = new AuthService(keychain, identity, NullLogger<AuthService>.Instance);
+        var sut      = new AuthService(keychain, identity, NullLogger<AuthService>.Instance,
+            Options.Create(new SesLocalOptions()));
 
         // Don't call HandleAuthCallbackAsync — simulate already-stored-but-expired state
         // by getting token when _cachedAccessToken is null

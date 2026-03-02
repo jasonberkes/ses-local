@@ -1,7 +1,9 @@
 using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
+using Ses.Local.Core.Options;
 using Ses.Local.Tray.Services;
 
 namespace Ses.Local.Tray;
@@ -20,8 +22,13 @@ internal static class Program
         }
 
         var host = Host.CreateDefaultBuilder(args)
-            .ConfigureServices((_, services) =>
+            .ConfigureServices((ctx, services) =>
             {
+                // SesLocal options — URLs are configurable via appsettings.json
+                services.Configure<SesLocalOptions>(ctx.Configuration.GetSection(SesLocalOptions.SectionName));
+                services.AddSingleton<IValidateOptions<SesLocalOptions>, SesLocalOptionsValidator>();
+                services.AddOptions<SesLocalOptions>().ValidateOnStart();
+
                 // DaemonAuthProxy connects to daemon via Unix domain socket
                 services.AddSingleton<DaemonAuthProxy>();
                 services.AddSingleton<IAuthService>(sp => sp.GetRequiredService<DaemonAuthProxy>());

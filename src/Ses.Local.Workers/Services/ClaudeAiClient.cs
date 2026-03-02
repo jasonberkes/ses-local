@@ -16,12 +16,15 @@ public sealed class ClaudeAiClient : IDisposable
     private readonly SemaphoreSlim _rateLimiter = new(5, 5);
     private static readonly TimeSpan RateWindow = TimeSpan.FromSeconds(1);
 
-    public ClaudeAiClient(string sessionCookie, ILogger<ClaudeAiClient> logger)
+    private const string DefaultBaseUrl = "https://claude.ai";
+
+    public ClaudeAiClient(string sessionCookie, ILogger<ClaudeAiClient> logger,
+        string baseUrl = DefaultBaseUrl)
     {
         _logger = logger;
         _http   = new HttpClient
         {
-            BaseAddress = new Uri("https://claude.ai"),
+            BaseAddress = new Uri(baseUrl),
             Timeout     = TimeSpan.FromSeconds(30)
         };
         // Set the cookie in both possible formats
@@ -29,7 +32,7 @@ public sealed class ClaudeAiClient : IDisposable
             $"sessionKey={sessionCookie}; __Host-next-auth.session-token={sessionCookie}");
         _http.DefaultRequestHeaders.Add("User-Agent",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-        _http.DefaultRequestHeaders.Add("Referer", "https://claude.ai/");
+        _http.DefaultRequestHeaders.Add("Referer", baseUrl.TrimEnd('/') + "/");
     }
 
     public async Task<string?> GetOrgIdAsync(CancellationToken ct = default)

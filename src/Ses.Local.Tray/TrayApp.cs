@@ -4,7 +4,9 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
+using Ses.Local.Core.Options;
 using Ses.Local.Tray.Converters;
 using Ses.Local.Tray.Services;
 using Ses.Local.Tray.ViewModels;
@@ -177,7 +179,8 @@ public partial class TrayApp : Application
         {
             var auth = _services?.GetRequiredService<IAuthService>();
             if (auth is null) return;
-            var vm = new MainWindowViewModel(auth);
+            var opts = _services!.GetRequiredService<IOptions<SesLocalOptions>>();
+            var vm = new MainWindowViewModel(auth, opts);
             _mainWindow = new MainWindow(vm);
             _mainWindow.Closed += (_, _) => _mainWindow = null;
             _mainWindow.Show();

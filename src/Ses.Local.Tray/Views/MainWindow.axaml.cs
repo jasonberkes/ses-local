@@ -36,7 +36,7 @@ public partial class MainWindow : Window
     }
 
     private void OnTroubleshootClick(object? sender, RoutedEventArgs e) =>
-        MainWindowViewModel.OpenTroubleshoot();
+        _vm?.OpenTroubleshoot();
 
     private void OnQuitClick(object? sender, RoutedEventArgs e) =>
         (Avalonia.Application.Current?.ApplicationLifetime as

@@ -1,7 +1,9 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 
 namespace Ses.Local.Workers.Services;
 
@@ -13,10 +15,14 @@ namespace Ses.Local.Workers.Services;
 public sealed class CloudMemoryRetainer
 {
     private readonly ILogger<CloudMemoryRetainer> _logger;
-    private const string MemoryBaseUrl = "https://memory.tm.supereasysoftware.com";
+    private readonly string _memoryBaseUrl;
     private static readonly JsonSerializerOptions s_json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public CloudMemoryRetainer(ILogger<CloudMemoryRetainer> logger) => _logger = logger;
+    public CloudMemoryRetainer(ILogger<CloudMemoryRetainer> logger, IOptions<SesLocalOptions> options)
+    {
+        _logger = logger;
+        _memoryBaseUrl = options.Value.MemoryBaseUrl;
+    }
 
     /// <summary>
     /// Retains a summary of the conversation as a memory.
@@ -83,11 +89,11 @@ public sealed class CloudMemoryRetainer
         }
     }
 
-    private static System.Net.Http.HttpClient BuildHttpClient(string pat)
+    private System.Net.Http.HttpClient BuildHttpClient(string pat)
     {
         var http = new System.Net.Http.HttpClient
         {
-            BaseAddress = new Uri(MemoryBaseUrl),
+            BaseAddress = new Uri(_memoryBaseUrl),
             Timeout     = TimeSpan.FromSeconds(15)
         };
         http.DefaultRequestHeaders.Authorization =

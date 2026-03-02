@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Options;
 using Ses.Local.Workers.Services;
@@ -15,11 +16,13 @@ public static class DependencyInjection
         // SQLite data layer
         services.AddSingleton<ILocalDbService, LocalDbService>();
 
-        // Options
+        // Options — validate all URLs at startup
         if (configuration is not null)
             services.Configure<SesLocalOptions>(configuration.GetSection(SesLocalOptions.SectionName));
         else
             services.Configure<SesLocalOptions>(_ => { });
+        services.AddSingleton<IValidateOptions<SesLocalOptions>, SesLocalOptionsValidator>();
+        services.AddOptions<SesLocalOptions>().ValidateOnStart();
 
         // OS keychain — platform-specific
         if (OperatingSystem.IsMacOS())
@@ -31,10 +34,11 @@ public static class DependencyInjection
         else
             services.AddSingleton<ICredentialStore, InMemoryCredentialStore>(); // Linux/CI
 
-        // Identity HTTP client
-        services.AddHttpClient<IdentityClient>(client =>
+        // Identity HTTP client — base address driven by options
+        services.AddHttpClient<IdentityClient>((sp, client) =>
         {
-            client.BaseAddress = new Uri("https://identity.tm.supereasysoftware.com/");
+            var opts = sp.GetRequiredService<IOptions<SesLocalOptions>>().Value;
+            client.BaseAddress = new Uri(opts.IdentityBaseUrl.TrimEnd('/') + "/");
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 

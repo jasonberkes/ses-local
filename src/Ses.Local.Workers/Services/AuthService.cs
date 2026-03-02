@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 
 namespace Ses.Local.Workers.Services;
 
@@ -14,11 +16,11 @@ public sealed class AuthService : IAuthService
 {
     private const string KeyRefresh = "ses-local-refresh";
     private const string KeyPat     = "ses-local-pat";
-    private const string LoginUrl   = "https://identity.tm.supereasysoftware.com/api/v1/install/login";
 
     private readonly ICredentialStore _keychain;
     private readonly IdentityClient _identity;
     private readonly ILogger<AuthService> _logger;
+    private readonly string _loginUrl;
 
     // In-memory cache of current access token to avoid keychain reads on every call
     private string? _cachedAccessToken;
@@ -28,11 +30,13 @@ public sealed class AuthService : IAuthService
     public AuthService(
         ICredentialStore keychain,
         IdentityClient identity,
-        ILogger<AuthService> logger)
+        ILogger<AuthService> logger,
+        IOptions<SesLocalOptions> options)
     {
         _keychain = keychain;
         _identity = identity;
         _logger   = logger;
+        _loginUrl = options.Value.IdentityBaseUrl.TrimEnd('/') + "/api/v1/install/login";
     }
 
     public async Task HandleAuthCallbackAsync(string refreshToken, string accessToken, CancellationToken ct = default)
@@ -104,7 +108,7 @@ public sealed class AuthService : IAuthService
     public Task TriggerReauthAsync(CancellationToken ct = default)
     {
         // Open browser to re-auth login (no install token required for re-auth)
-        var url = $"{LoginUrl}?reauth=true";
+        var url = $"{_loginUrl}?reauth=true";
         _logger.LogInformation("Triggering re-auth: {Url}", url);
         OpenBrowser(url);
         return Task.CompletedTask;

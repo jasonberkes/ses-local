@@ -1,14 +1,17 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 
 namespace Ses.Local.Tray.ViewModels;
 
 public sealed class MainWindowViewModel : INotifyPropertyChanged
 {
     private readonly IAuthService _auth;
+    private readonly string _troubleshootUrl;
     private string _userDisplayName = "Loading...";
     private bool _isFirstRun;
     private readonly string _appVersion;
@@ -32,9 +35,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public string AppVersion => _appVersion;
 
-    public MainWindowViewModel(IAuthService auth)
+    public MainWindowViewModel(IAuthService auth, IOptions<SesLocalOptions> options)
     {
         _auth = auth;
+        _troubleshootUrl = options.Value.DocsBaseUrl.TrimEnd('/') + "/ses-local/troubleshoot";
         _appVersion = GetAppVersion();
         InitFeatures();
         _ = LoadAsync();
@@ -103,8 +107,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         UserDisplayName = "Signed out";
     }
 
-    public static void OpenTroubleshoot() =>
-        OpenUrl("https://docs.supereasysoftware.com/ses-local/troubleshoot");
+    public void OpenTroubleshoot() =>
+        OpenUrl(_troubleshootUrl);
 
     private static void OpenUrl(string url)
     {
