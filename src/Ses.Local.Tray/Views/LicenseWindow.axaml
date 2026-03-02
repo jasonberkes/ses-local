@@ -1,0 +1,45 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Ses.Local.Tray.Views.LicenseWindow"
+        Title="Activate ses-local"
+        Width="460" Height="280"
+        MinWidth="460" MaxWidth="460"
+        MinHeight="280" MaxHeight="280"
+        CanResize="False"
+        ShowInTaskbar="True"
+        WindowStartupLocation="CenterScreen">
+
+  <DockPanel Margin="24">
+    <!-- Header -->
+    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+      <TextBlock Text="Activate ses-local" FontSize="18" FontWeight="Bold"/>
+      <TextBlock Text="Enter the license key that was emailed to you."
+                 FontSize="13" Foreground="#666" Margin="0,4,0,0"/>
+    </StackPanel>
+
+    <!-- Footer buttons -->
+    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                HorizontalAlignment="Right" Spacing="8" Margin="0,16,0,0">
+      <Button x:Name="CancelButton" Content="Cancel" Width="80" Click="OnCancelClick"/>
+      <Button x:Name="ActivateButton" Content="Activate" Width="90"
+              Background="#4f46e5" Foreground="White" Click="OnActivateClick"/>
+    </StackPanel>
+
+    <!-- Status message -->
+    <TextBlock x:Name="StatusText" DockPanel.Dock="Bottom"
+               FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap"
+               Foreground="#d32f2f" IsVisible="False"/>
+
+    <!-- License key input -->
+    <StackPanel>
+      <TextBlock Text="License Key" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,6"/>
+      <TextBox x:Name="LicenseKeyBox"
+               Watermark="eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+               FontFamily="Courier New,monospace"
+               FontSize="11"
+               AcceptsReturn="False"
+               Height="56"
+               TextWrapping="Wrap"/>
+    </StackPanel>
+  </DockPanel>
+</Window>

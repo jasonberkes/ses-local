@@ -38,8 +38,18 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
+        // License validation HTTP client
+        services.AddHttpClient<LicenseValidationClient>(client =>
+        {
+            client.BaseAddress = new Uri("https://identity.tm.supereasysoftware.com/");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+
         // Auth service
         services.AddSingleton<IAuthService, AuthService>();
+
+        // License service
+        services.AddSingleton<ILicenseService, LicenseService>();
 
         // Cloud sync services
         services.AddSingleton<DocumentServiceUploader>();
