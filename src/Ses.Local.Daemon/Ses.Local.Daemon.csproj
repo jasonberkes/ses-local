@@ -7,4 +7,9 @@
     <ProjectReference Include="..\Ses.Local.Core\Ses.Local.Core.csproj" />
     <ProjectReference Include="..\Ses.Local.Workers\Ses.Local.Workers.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
+    <PackageReference Include="OpenTelemetry.Exporter.Console" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+  </ItemGroup>
 </Project>

@@ -1,7 +1,9 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Workers.Services;
+using Ses.Local.Workers.Telemetry;
 
 namespace Ses.Local.Workers.Workers;
 
@@ -13,7 +15,7 @@ namespace Ses.Local.Workers.Workers;
 /// Runs every 2 minutes when work is pending, backs off to 10 minutes when idle.
 /// Fails gracefully on all network errors — never crashes the app.
 /// </summary>
-public sealed class CloudSyncWorker : BackgroundService
+public sealed partial class CloudSyncWorker : BackgroundService
 {
     private readonly ILocalDbService _db;
     private readonly IAuthService _auth;
@@ -41,7 +43,7 @@ public sealed class CloudSyncWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("CloudSyncWorker started");
+        LogStarted(_logger);
         var interval = ActiveInterval;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -55,7 +57,7 @@ public sealed class CloudSyncWorker : BackgroundService
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "CloudSyncWorker: sync pass failed (non-fatal)");
+                LogSyncPassFailed(_logger, ex);
                 interval = IdleInterval; // back off on error
             }
         }
@@ -63,17 +65,19 @@ public sealed class CloudSyncWorker : BackgroundService
 
     private async Task<int> RunSyncPassAsync(CancellationToken ct)
     {
+        using var activity = SesLocalMetrics.ActivitySource.StartActivity("CloudSyncWorker.SyncPass");
+
         var pat = await _auth.GetAccessTokenAsync(ct);
         if (string.IsNullOrEmpty(pat))
         {
-            _logger.LogDebug("CloudSyncWorker: no access token available — skipping");
+            LogNoAccessToken(_logger);
             return 0;
         }
 
         var pending = await _db.GetPendingSyncAsync(BatchSize, ct);
         if (pending.Count == 0) return 0;
 
-        _logger.LogDebug("CloudSyncWorker: syncing {Count} sessions", pending.Count);
+        LogSyncingCount(_logger, pending.Count);
         int synced = 0;
 
         foreach (var session in pending)
@@ -85,6 +89,8 @@ public sealed class CloudSyncWorker : BackgroundService
                 // Get messages for this session
                 var messages = await _db.GetMessagesAsync(session.Id, ct);
 
+                SesLocalMetrics.UploadsAttempted.Add(1);
+
                 // Upload to DocumentService
                 var docId = await _docUploader.UploadAsync(session, messages, pat, ct);
 
@@ -93,16 +99,41 @@ public sealed class CloudSyncWorker : BackgroundService
 
                 // Mark synced regardless of memory result — document upload is the primary
                 await _db.MarkSyncedAsync(session.Id, docId, ct);
+
+                SesLocalMetrics.UploadsSucceeded.Add(1);
                 synced++;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "CloudSyncWorker: failed to sync session {Id}", session.Id);
+                SesLocalMetrics.UploadsFailed.Add(1);
+                LogSessionSyncFailed(_logger, session.Id, ex);
                 // Continue with next session
             }
         }
 
-        _logger.LogDebug("CloudSyncWorker: sync pass complete — {Synced}/{Total}", synced, pending.Count);
+        LogSyncPassComplete(_logger, synced, pending.Count);
+        activity?.SetTag("sessions.synced", synced);
+        activity?.SetTag("sessions.total", pending.Count);
         return synced;
     }
+
+    // ── LoggerMessage source generators (high-perf structured logging) ────────
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "CloudSyncWorker started")]
+    private static partial void LogStarted(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "CloudSyncWorker: no access token available — skipping")]
+    private static partial void LogNoAccessToken(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "CloudSyncWorker: syncing {Count} sessions")]
+    private static partial void LogSyncingCount(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "CloudSyncWorker: failed to sync session {SessionId}")]
+    private static partial void LogSessionSyncFailed(ILogger logger, long sessionId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "CloudSyncWorker: sync pass complete — {Synced}/{Total}")]
+    private static partial void LogSyncPassComplete(ILogger logger, int synced, int total);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "CloudSyncWorker: sync pass failed (non-fatal)")]
+    private static partial void LogSyncPassFailed(ILogger logger, Exception ex);
 }

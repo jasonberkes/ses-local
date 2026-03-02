@@ -62,4 +62,18 @@ public sealed class SesLocalOptions
 
     /// <summary>Project paths to exclude from CLAUDE.md generation (substring match).</summary>
     public IReadOnlyList<string> ClaudeMdExcludePaths { get; set; } = [];
+
+    // ── Telemetry ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Enable OpenTelemetry metrics and tracing.
+    /// When false, all OTel instruments are no-ops (no overhead).
+    /// </summary>
+    public bool EnableTelemetry { get; set; } = true;
+
+    /// <summary>
+    /// Telemetry exporter to use.
+    /// Supported values: "console" (default), "otlp" (future).
+    /// </summary>
+    public string TelemetryExporter { get; set; } = "console";
 }

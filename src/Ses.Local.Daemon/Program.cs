@@ -6,11 +6,15 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 using Ses.Local.Core.Services;
 using Ses.Local.Workers;
 using Ses.Local.Workers.Services;
+using Ses.Local.Workers.Telemetry;
 using Ses.Local.Workers.Workers;
 
 namespace Ses.Local.Daemon;
@@ -42,6 +46,21 @@ internal static class Program
         });
 
         builder.Services.AddSesLocalWorkers(builder.Configuration);
+
+        // OpenTelemetry — metrics and tracing (conditioned on EnableTelemetry option)
+        var sesLocalSection = builder.Configuration.GetSection(SesLocalOptions.SectionName);
+        var enableTelemetry = sesLocalSection.GetValue("EnableTelemetry", defaultValue: true);
+        if (enableTelemetry)
+        {
+            builder.Services.AddOpenTelemetry()
+                .WithMetrics(metrics => metrics
+                    .AddMeter(SesLocalMetrics.MeterName)
+                    .AddConsoleExporter())
+                .WithTracing(tracing => tracing
+                    .AddSource(SesLocalMetrics.ActivitySourceName)
+                    .AddConsoleExporter());
+        }
+
         builder.Services.AddSingleton<UriSchemeHandler>();
         builder.Services.AddHostedService<LevelDbWatcher>();
         builder.Services.AddHostedService<ClaudeCodeWatcher>();

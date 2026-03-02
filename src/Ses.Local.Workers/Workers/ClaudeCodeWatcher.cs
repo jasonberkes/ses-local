@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -8,6 +9,7 @@ using Ses.Local.Core.Options;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Ses.Local.Workers.Services;
+using Ses.Local.Workers.Telemetry;
 
 namespace Ses.Local.Workers.Workers;
 
@@ -19,7 +21,7 @@ namespace Ses.Local.Workers.Workers;
 /// DEVELOPER SCOPE ONLY — only runs when EnableClaudeCodeSync = true.
 /// Full scope-gate via PAT implemented in WI-936.
 /// </summary>
-public sealed class ClaudeCodeWatcher : BackgroundService
+public sealed partial class ClaudeCodeWatcher : BackgroundService
 {
     private readonly ILocalDbService _db;
     private readonly IClaudeMdGenerator _claudeMdGenerator;
@@ -51,18 +53,18 @@ public sealed class ClaudeCodeWatcher : BackgroundService
     {
         if (!_options.EnableClaudeCodeSync)
         {
-            _logger.LogInformation("ClaudeCodeWatcher disabled via options");
+            LogDisabledViaOptions(_logger);
             return;
         }
 
         var projectsRoot = GetProjectsRoot();
         if (!Directory.Exists(projectsRoot))
         {
-            _logger.LogInformation("Claude Code projects directory not found: {Path}. Watcher idle.", projectsRoot);
+            LogProjectsDirNotFound(_logger, projectsRoot);
             return;
         }
 
-        _logger.LogInformation("ClaudeCodeWatcher starting. Watching: {Path}", projectsRoot);
+        LogStarting(_logger, projectsRoot);
 
         // Load persisted positions so restarts resume from the correct offset
         LoadPositions();
@@ -114,7 +116,7 @@ public sealed class ClaudeCodeWatcher : BackgroundService
         mainWatcher.Created += (_, e) => _ = HandleFileChangedAsync(e.FullPath, CancellationToken.None);
         _watchers.Add(mainWatcher);
 
-        _logger.LogDebug("FileSystemWatcher active on {Path}", root);
+        LogWatcherActive(_logger, root);
     }
 
     private async Task HandleFileChangedAsync(string filePath, CancellationToken ct)
@@ -125,7 +127,7 @@ public sealed class ClaudeCodeWatcher : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error processing JSONL file: {Path}", filePath);
+            LogFileProcessingError(_logger, filePath, ex);
         }
     }
 
@@ -143,7 +145,7 @@ public sealed class ClaudeCodeWatcher : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error scanning JSONL file: {Path}", file);
+                LogFileScanError(_logger, file, ex);
             }
         }
     }
@@ -229,7 +231,7 @@ public sealed class ClaudeCodeWatcher : BackgroundService
             }
             catch (JsonException ex)
             {
-                _logger.LogDebug(ex, "Skipping malformed JSONL line in {File}", filePath);
+                LogMalformedJsonLine(_logger, filePath, ex);
             }
         }
 
@@ -266,8 +268,13 @@ public sealed class ClaudeCodeWatcher : BackgroundService
                 _ = _claudeMdGenerator.GenerateAsync(cwd, ct);
         }
 
-        _logger.LogDebug("Processed {MsgCount} messages, {ObsCount} observations from {File}",
-            newMessages.Count, newObservations.Count, filePath);
+        // Record metrics for this session
+        SesLocalMetrics.SessionsProcessed.Add(1, new KeyValuePair<string, object?>("source", "CC"));
+        foreach (var obs in newObservations)
+            SesLocalMetrics.ObservationsExtracted.Add(1,
+                new KeyValuePair<string, object?>("type", obs.ObservationType.ToString()));
+
+        LogSessionProcessed(_logger, newMessages.Count, newObservations.Count, filePath);
     }
 
     // ── Observation Extraction ────────────────────────────────────────────────
@@ -477,11 +484,11 @@ public sealed class ClaudeCodeWatcher : BackgroundService
             if (loaded is null) return;
             foreach (var (k, v) in loaded)
                 _filePositions[k] = v;
-            _logger.LogInformation("Loaded {Count} file positions from disk", loaded.Count);
+            LogPositionsLoaded(_logger, loaded.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to load watcher positions — starting from 0");
+            LogPositionsLoadFailed(_logger, ex);
         }
     }
 
@@ -494,7 +501,7 @@ public sealed class ClaudeCodeWatcher : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to save watcher positions");
+            LogPositionsSaveFailed(_logger, ex);
         }
     }
 
@@ -597,4 +604,39 @@ public sealed class ClaudeCodeWatcher : BackgroundService
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return Path.Combine(home, ".claude", "projects");
     }
+
+    // ── LoggerMessage source generators (high-perf structured logging) ────────
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "ClaudeCodeWatcher disabled via options")]
+    private static partial void LogDisabledViaOptions(ILogger logger);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Claude Code projects directory not found: {Path}. Watcher idle.")]
+    private static partial void LogProjectsDirNotFound(ILogger logger, string path);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "ClaudeCodeWatcher starting. Watching: {Path}")]
+    private static partial void LogStarting(ILogger logger, string path);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "FileSystemWatcher active on {Path}")]
+    private static partial void LogWatcherActive(ILogger logger, string path);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Error processing JSONL file: {Path}")]
+    private static partial void LogFileProcessingError(ILogger logger, string path, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Error scanning JSONL file: {Path}")]
+    private static partial void LogFileScanError(ILogger logger, string path, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping malformed JSONL line in {File}")]
+    private static partial void LogMalformedJsonLine(ILogger logger, string file, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Processed {MsgCount} messages, {ObsCount} observations from {File}")]
+    private static partial void LogSessionProcessed(ILogger logger, int msgCount, int obsCount, string file);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Loaded {Count} file positions from disk")]
+    private static partial void LogPositionsLoaded(ILogger logger, int count);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load watcher positions — starting from 0")]
+    private static partial void LogPositionsLoadFailed(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to save watcher positions")]
+    private static partial void LogPositionsSaveFailed(ILogger logger, Exception ex);
 }
