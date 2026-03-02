@@ -75,16 +75,16 @@ public partial class TrayApp : Application
     public void SetServiceProvider(IServiceProvider services)
     {
         _services = services;
-        Dispatcher.UIThread.InvokeAsync(UpdateStatusAsync);
+        Dispatcher.UIThread.InvokeAsync(() => UpdateStatusAsync());
     }
 
-    private async Task UpdateStatusAsync()
+    private async Task UpdateStatusAsync(CancellationToken ct = default)
     {
         if (_statusItem is null || _services is null) return;
         try
         {
             var auth  = _services.GetRequiredService<IAuthService>();
-            var state = await auth.GetStateAsync();
+            var state = await auth.GetStateAsync(ct);
 
             if (state.IsAuthenticated)
             {

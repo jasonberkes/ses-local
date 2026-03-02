@@ -10,19 +10,19 @@ namespace Ses.Local.Hooks.Handlers;
 /// </summary>
 internal static class SessionStartHandler
 {
-    internal static async Task RunAsync()
+    internal static async Task RunAsync(CancellationToken ct = default)
     {
-        var input = await ReadInputAsync();
+        var input = await ReadInputAsync(ct);
         if (input is null) return;
 
         var sessionId = input.GetValueOrDefault("session_id")?.ToString() ?? string.Empty;
         var cwd       = input.GetValueOrDefault("cwd")?.ToString() ?? string.Empty;
 
-        using var ctx = await HookContext.CreateAsync();
+        using var ctx = await HookContext.CreateAsync(ct);
 
         // Search for memories relevant to the current working directory
         var query   = BuildQuery(cwd);
-        var results = await ctx.SearchMemoryAsync(query, limit: 10);
+        var results = await ctx.SearchMemoryAsync(query, limit: 10, ct);
 
         if (results.Count == 0)
         {
@@ -56,11 +56,11 @@ internal static class SessionStartHandler
         return terms.Length > 0 ? string.Join(" ", terms) : "decision architecture";
     }
 
-    private static async Task<Dictionary<string, object>?> ReadInputAsync()
+    private static async Task<Dictionary<string, object>?> ReadInputAsync(CancellationToken ct = default)
     {
         try
         {
-            var json = await Console.In.ReadToEndAsync();
+            var json = await Console.In.ReadToEndAsync(ct);
             if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, object>();
             return JsonSerializer.Deserialize(json, HooksJsonContext.Default.DictionaryStringObject);
         }

@@ -131,7 +131,7 @@ public sealed class BrowserExtensionListener : BackgroundService
             if (payload?.Conversations is null || payload.Conversations.Count == 0)
             {
                 resp.StatusCode = 200;
-                await WriteJsonAsync(resp, new { synced = 0 });
+                await WriteJsonAsync(resp, new { synced = 0 }, ct);
                 return;
             }
 
@@ -144,7 +144,7 @@ public sealed class BrowserExtensionListener : BackgroundService
 
             _logger.LogDebug("Extension sync: {Count} conversations stored", synced);
             resp.StatusCode = 200;
-            await WriteJsonAsync(resp, new { synced });
+            await WriteJsonAsync(resp, new { synced }, ct);
         }
         catch (Exception ex)
         {
@@ -222,7 +222,7 @@ public sealed class BrowserExtensionListener : BackgroundService
                 resp.StatusCode = 400;
                 await WriteHtmlAsync(resp, "Authentication Failed",
                     "Missing required tokens. Please try signing in again.",
-                    "https://identity.tm.supereasysoftware.com/api/v1/install/login?reauth=true");
+                    "https://identity.tm.supereasysoftware.com/api/v1/install/login?reauth=true", ct);
                 return;
             }
 
@@ -232,7 +232,7 @@ public sealed class BrowserExtensionListener : BackgroundService
             resp.StatusCode = 200;
             await WriteHtmlAsync(resp, "Authentication Successful",
                 "You are now signed in to ses-local. You can close this tab.",
-                retryLink: null);
+                retryLink: null, ct);
         }
         catch (Exception ex)
         {
@@ -240,11 +240,11 @@ public sealed class BrowserExtensionListener : BackgroundService
             resp.StatusCode = 500;
             await WriteHtmlAsync(resp, "Authentication Error",
                 "Something went wrong. Please try again.",
-                "https://identity.tm.supereasysoftware.com/api/v1/install/login?reauth=true");
+                "https://identity.tm.supereasysoftware.com/api/v1/install/login?reauth=true", ct);
         }
     }
 
-    private static async Task WriteHtmlAsync(HttpListenerResponse resp, string title, string message, string? retryLink)
+    private static async Task WriteHtmlAsync(HttpListenerResponse resp, string title, string message, string? retryLink, CancellationToken ct = default)
     {
         var encodedTitle   = WebUtility.HtmlEncode(title);
         var encodedMessage = WebUtility.HtmlEncode(message);
@@ -269,17 +269,17 @@ public sealed class BrowserExtensionListener : BackgroundService
         resp.ContentType = "text/html; charset=utf-8";
         var bytes = Encoding.UTF8.GetBytes(html);
         resp.ContentLength64 = bytes.Length;
-        await resp.OutputStream.WriteAsync(bytes);
+        await resp.OutputStream.WriteAsync(bytes, ct);
         resp.Close();
     }
 
-    private static async Task WriteJsonAsync(HttpListenerResponse resp, object data)
+    private static async Task WriteJsonAsync(HttpListenerResponse resp, object data, CancellationToken ct = default)
     {
         resp.ContentType = "application/json";
         var json  = JsonSerializer.Serialize(data);
         var bytes = Encoding.UTF8.GetBytes(json);
         resp.ContentLength64 = bytes.Length;
-        await resp.OutputStream.WriteAsync(bytes);
+        await resp.OutputStream.WriteAsync(bytes, ct);
         resp.Close();
     }
 }

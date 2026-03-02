@@ -54,7 +54,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         MemoryFeatures.Add(new FeatureStatus { Name = "Local cache",     Key = "local_memory_cache", IsEnabled = true });
     }
 
-    private async Task LoadAsync()
+    private async Task LoadAsync(CancellationToken ct = default)
     {
         var config = SesConfig.Load();
         IsFirstRun = config.IsFirstRun;
@@ -68,12 +68,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         // Set status dots based on detection
-        await UpdateStatusDotsAsync();
+        await UpdateStatusDotsAsync(ct);
     }
 
-    private async Task UpdateStatusDotsAsync()
+    private async Task UpdateStatusDotsAsync(CancellationToken ct = default)
     {
-        var state = await _auth.GetStateAsync();
+        var state = await _auth.GetStateAsync(ct);
 
         foreach (var f in ConvSyncFeatures.Concat(MemoryFeatures))
         {
@@ -87,19 +87,19 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    public async Task ToggleFeatureAsync(FeatureStatus feature, bool enabled)
+    public async Task ToggleFeatureAsync(FeatureStatus feature, bool enabled, CancellationToken ct = default)
     {
         feature.IsEnabled = enabled;
         var config = SesConfig.Load();
         config.FeatureFlags[feature.Key] = enabled;
         config.Save();
-        await UpdateStatusDotsAsync();
+        await UpdateStatusDotsAsync(ct);
         // Cloud sync of feature flag happens in WI-947 (ses-mcp manager)
     }
 
-    public async Task SignOutAsync()
+    public async Task SignOutAsync(CancellationToken ct = default)
     {
-        await _auth.SignOutAsync();
+        await _auth.SignOutAsync(ct);
         UserDisplayName = "Signed out";
     }
 

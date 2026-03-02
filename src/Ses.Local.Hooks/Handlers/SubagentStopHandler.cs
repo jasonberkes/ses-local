@@ -9,9 +9,9 @@ namespace Ses.Local.Hooks.Handlers;
 /// </summary>
 internal static class SubagentStopHandler
 {
-    internal static async Task RunAsync()
+    internal static async Task RunAsync(CancellationToken ct = default)
     {
-        var json = await Console.In.ReadToEndAsync();
+        var json = await Console.In.ReadToEndAsync(ct);
         if (string.IsNullOrWhiteSpace(json)) return;
 
         Dictionary<string, object>? input;
@@ -28,8 +28,8 @@ internal static class SubagentStopHandler
         // Store on parent session if available, otherwise on the subagent session
         var targetSession = !string.IsNullOrEmpty(parentSessionId) ? parentSessionId : sessionId;
 
-        using var ctx = await HookContext.CreateAsync();
+        using var ctx = await HookContext.CreateAsync(ct);
         var content = $"Subagent completed: {subSummary}";
-        await ctx.SaveObservationAsync(targetSession, content, "subagent_stop", importance: 0.7);
+        await ctx.SaveObservationAsync(targetSession, content, "subagent_stop", importance: 0.7, ct: ct);
     }
 }

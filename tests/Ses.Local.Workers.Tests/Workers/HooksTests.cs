@@ -62,7 +62,7 @@ public sealed class HooksTests
         {
             Console.SetIn(new StringReader(
                 "{\"session_id\":\"test\",\"tool\":\"Bash\",\"input\":{\"command\":\"ls\"},\"output\":\"file.cs\"}"));
-            var ex = await Record.ExceptionAsync(PostToolUseHandler.RunAsync);
+            var ex = await Record.ExceptionAsync(() => PostToolUseHandler.RunAsync());
             Assert.Null(ex);
         }
         finally { Console.SetIn(originalIn); }
@@ -76,7 +76,7 @@ public sealed class HooksTests
         {
             Console.SetIn(new StringReader(
                 "{\"session_id\":\"test\",\"context_summary\":\"We decided to use PBKDF2 for key derivation. Architecture pattern: always use factory methods.\"}"));
-            var ex = await Record.ExceptionAsync(PreCompactHandler.RunAsync);
+            var ex = await Record.ExceptionAsync(() => PreCompactHandler.RunAsync());
             Assert.Null(ex);
         }
         finally { Console.SetIn(originalIn); }
@@ -89,7 +89,7 @@ public sealed class HooksTests
         try
         {
             Console.SetIn(new StringReader("{\"session_id\":\"test-session\",\"num_turns\":5}"));
-            var ex = await Record.ExceptionAsync(StopHandler.RunAsync);
+            var ex = await Record.ExceptionAsync(() => StopHandler.RunAsync());
             Assert.Null(ex);
         }
         finally { Console.SetIn(originalIn); }
@@ -103,7 +103,7 @@ public sealed class HooksTests
         {
             Console.SetIn(new StringReader(
                 "{\"session_id\":\"sub\",\"parent_session_id\":\"parent\",\"summary\":\"Implemented OAuth\"}"));
-            var ex = await Record.ExceptionAsync(SubagentStopHandler.RunAsync);
+            var ex = await Record.ExceptionAsync(() => SubagentStopHandler.RunAsync());
             Assert.Null(ex);
         }
         finally { Console.SetIn(originalIn); }

@@ -6,7 +6,10 @@ using Ses.Local.Hooks.Handlers;
 
 var hookType = args.Length > 0 ? args[0] : string.Empty;
 
-Func<Task> handler = hookType switch
+using var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+Func<CancellationToken, Task> handler = hookType switch
 {
     "SessionStart"       => SessionStartHandler.RunAsync,
     "UserPromptSubmit"   => UserPromptSubmitHandler.RunAsync,
@@ -14,7 +17,7 @@ Func<Task> handler = hookType switch
     "PreCompact"         => PreCompactHandler.RunAsync,
     "Stop"               => StopHandler.RunAsync,
     "SubagentStop"       => SubagentStopHandler.RunAsync,
-    _                    => () => { Console.Error.WriteLine($"Unknown hook: {hookType}"); return Task.CompletedTask; }
+    _                    => _ => { Console.Error.WriteLine($"Unknown hook: {hookType}"); return Task.CompletedTask; }
 };
 
-await handler();
+await handler(cts.Token);

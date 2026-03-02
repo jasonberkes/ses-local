@@ -25,23 +25,23 @@ internal sealed class HookContext : IDisposable
 
     private HookContext() { }
 
-    public static async Task<HookContext> CreateAsync()
+    public static async Task<HookContext> CreateAsync(CancellationToken ct = default)
     {
         var ctx = new HookContext();
-        ctx.Pat = await GetPatAsync();
+        ctx.Pat = await GetPatAsync(ct);
         ctx.Http = BuildHttpClient(ctx.Pat);
-        ctx.SesLocalAvailable = await CheckSesLocalAsync(ctx.Http);
+        ctx.SesLocalAvailable = await CheckSesLocalAsync(ctx.Http, ct);
         return ctx;
     }
 
     // ── PAT retrieval ─────────────────────────────────────────────────────────
 
-    private static async Task<string?> GetPatAsync()
+    private static async Task<string?> GetPatAsync(CancellationToken ct = default)
     {
         try
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-                return await GetMacPatAsync();
+                return await GetMacPatAsync(ct);
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 return GetWindowsPat();
@@ -50,7 +50,7 @@ internal sealed class HookContext : IDisposable
         return null;
     }
 
-    private static async Task<string?> GetMacPatAsync()
+    private static async Task<string?> GetMacPatAsync(CancellationToken ct = default)
     {
         var psi = new System.Diagnostics.ProcessStartInfo
         {
@@ -62,7 +62,7 @@ internal sealed class HookContext : IDisposable
         };
         using var proc = System.Diagnostics.Process.Start(psi)!;
         if (!proc.WaitForExit(3000)) { proc.Kill(); return null; }
-        var result = (await proc.StandardOutput.ReadToEndAsync()).Trim();
+        var result = (await proc.StandardOutput.ReadToEndAsync(ct)).Trim();
         return string.IsNullOrEmpty(result) ? null : result;
     }
 
@@ -85,11 +85,11 @@ internal sealed class HookContext : IDisposable
         return client;
     }
 
-    private static async Task<bool> CheckSesLocalAsync(HttpClient http)
+    private static async Task<bool> CheckSesLocalAsync(HttpClient http, CancellationToken ct = default)
     {
         try
         {
-            var resp = await http.GetAsync("/health");
+            var resp = await http.GetAsync("/health", ct);
             return resp.IsSuccessStatusCode;
         }
         catch { return false; }
@@ -97,22 +97,22 @@ internal sealed class HookContext : IDisposable
 
     // ── ses-local API calls ───────────────────────────────────────────────────
 
-    public async Task<List<SearchResult>> SearchMemoryAsync(string query, int limit = 10)
+    public async Task<List<SearchResult>> SearchMemoryAsync(string query, int limit = 10, CancellationToken ct = default)
     {
-        if (!SesLocalAvailable || Http is null) return await SearchSqliteAsync(query, limit);
+        if (!SesLocalAvailable || Http is null) return await SearchSqliteAsync(query, limit, ct);
         try
         {
             var body = JsonSerializer.Serialize(new SearchRequest { Query = query, Limit = limit }, HookJsonContext.Default.SearchRequest);
             var resp = await Http.PostAsync("/api/hooks/search",
-                new StringContent(body, System.Text.Encoding.UTF8, "application/json"));
+                new StringContent(body, System.Text.Encoding.UTF8, "application/json"), ct);
             if (!resp.IsSuccessStatusCode) return [];
-            var json = await resp.Content.ReadAsStringAsync();
+            var json = await resp.Content.ReadAsStringAsync(ct);
             return JsonSerializer.Deserialize(json, HookJsonContext.Default.SearchResponse)?.Results ?? [];
         }
-        catch { return await SearchSqliteAsync(query, limit); }
+        catch { return await SearchSqliteAsync(query, limit, ct); }
     }
 
-    public async Task SaveObservationAsync(string sessionId, string content, string type, string? toolName = null, double importance = 0.5)
+    public async Task SaveObservationAsync(string sessionId, string content, string type, string? toolName = null, double importance = 0.5, CancellationToken ct = default)
     {
         if (SesLocalAvailable && Http is not null)
         {
@@ -122,16 +122,16 @@ internal sealed class HookContext : IDisposable
                     new ObservationRequest { SessionId = sessionId, Type = type, Content = content, ToolName = toolName },
                     HookJsonContext.Default.ObservationRequest);
                 await Http.PostAsync("/api/hooks/observation",
-                    new StringContent(body, System.Text.Encoding.UTF8, "application/json"));
+                    new StringContent(body, System.Text.Encoding.UTF8, "application/json"), ct);
                 return;
             }
             catch { }
         }
         // Fallback: write directly to SQLite
-        await SaveObservationSqliteAsync(sessionId, content, importance);
+        await SaveObservationSqliteAsync(sessionId, content, importance, ct);
     }
 
-    public async Task SaveSummaryAsync(string sessionId, string summary)
+    public async Task SaveSummaryAsync(string sessionId, string summary, CancellationToken ct = default)
     {
         if (SesLocalAvailable && Http is not null)
         {
@@ -141,23 +141,23 @@ internal sealed class HookContext : IDisposable
                     new SummaryRequest { SessionId = sessionId, Summary = summary },
                     HookJsonContext.Default.SummaryRequest);
                 await Http.PostAsync("/api/hooks/summary",
-                    new StringContent(body, System.Text.Encoding.UTF8, "application/json"));
+                    new StringContent(body, System.Text.Encoding.UTF8, "application/json"), ct);
                 return;
             }
             catch { }
         }
-        await SaveSummarySqliteAsync(sessionId, summary);
+        await SaveSummarySqliteAsync(sessionId, summary, ct);
     }
 
     // ── SQLite fallbacks ──────────────────────────────────────────────────────
 
-    private static async Task<List<SearchResult>> SearchSqliteAsync(string query, int limit)
+    private static async Task<List<SearchResult>> SearchSqliteAsync(string query, int limit, CancellationToken ct = default)
     {
         if (!File.Exists(DbPath)) return [];
         try
         {
             using var conn = new SqliteConnection($"Data Source={DbPath};Mode=ReadOnly;");
-            await conn.OpenAsync();
+            await conn.OpenAsync(ct);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 SELECT m.content
@@ -169,25 +169,25 @@ internal sealed class HookContext : IDisposable
             cmd.Parameters.AddWithValue("@q", query);
             cmd.Parameters.AddWithValue("@limit", limit);
             var results = new List<SearchResult>();
-            using var r = await cmd.ExecuteReaderAsync();
-            while (await r.ReadAsync())
+            using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
                 results.Add(new SearchResult { Content = r.GetString(0), Score = 1.0 });
             return results;
         }
         catch { return []; }
     }
 
-    private static async Task SaveObservationSqliteAsync(string sessionId, string content, double importance)
+    private static async Task SaveObservationSqliteAsync(string sessionId, string content, double importance, CancellationToken ct = default)
     {
         if (!File.Exists(DbPath)) return;
         try
         {
             // Ensure session exists first
-            long? dbSessionId = await GetOrCreateSessionIdAsync(sessionId);
+            long? dbSessionId = await GetOrCreateSessionIdAsync(sessionId, ct);
             if (dbSessionId is null) return;
 
             using var conn = new SqliteConnection($"Data Source={DbPath}");
-            await conn.OpenAsync();
+            await conn.OpenAsync(ct);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO memory_observations (session_id, content, importance_score, captured_at, synced_to_cloud)
@@ -197,21 +197,21 @@ internal sealed class HookContext : IDisposable
             cmd.Parameters.AddWithValue("@content", content);
             cmd.Parameters.AddWithValue("@importance", importance);
             cmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("O"));
-            await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync(ct);
         }
         catch { }
     }
 
-    private static async Task SaveSummarySqliteAsync(string sessionId, string summary)
+    private static async Task SaveSummarySqliteAsync(string sessionId, string summary, CancellationToken ct = default)
     {
         if (!File.Exists(DbPath)) return;
         try
         {
-            long? dbSessionId = await GetOrCreateSessionIdAsync(sessionId);
+            long? dbSessionId = await GetOrCreateSessionIdAsync(sessionId, ct);
             if (dbSessionId is null) return;
 
             using var conn = new SqliteConnection($"Data Source={DbPath}");
-            await conn.OpenAsync();
+            await conn.OpenAsync(ct);
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO memory_summaries (session_id, summary, model, created_at)
@@ -220,22 +220,22 @@ internal sealed class HookContext : IDisposable
             cmd.Parameters.AddWithValue("@sid", dbSessionId);
             cmd.Parameters.AddWithValue("@summary", summary);
             cmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("O"));
-            await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync(ct);
         }
         catch { }
     }
 
-    private static async Task<long?> GetOrCreateSessionIdAsync(string externalId)
+    private static async Task<long?> GetOrCreateSessionIdAsync(string externalId, CancellationToken ct = default)
     {
         try
         {
             using var conn = new SqliteConnection($"Data Source={DbPath}");
-            await conn.OpenAsync();
+            await conn.OpenAsync(ct);
 
             using var selectCmd = conn.CreateCommand();
             selectCmd.CommandText = "SELECT id FROM conv_sessions WHERE external_id = @eid";
             selectCmd.Parameters.AddWithValue("@eid", externalId);
-            var existing = await selectCmd.ExecuteScalarAsync();
+            var existing = await selectCmd.ExecuteScalarAsync(ct);
             if (existing is long id) return id;
 
             using var insertCmd = conn.CreateCommand();
@@ -246,12 +246,12 @@ internal sealed class HookContext : IDisposable
                 """;
             insertCmd.Parameters.AddWithValue("@eid", externalId);
             insertCmd.Parameters.AddWithValue("@now", DateTime.UtcNow.ToString("O"));
-            await insertCmd.ExecuteNonQueryAsync();
+            await insertCmd.ExecuteNonQueryAsync(ct);
 
             var idCmd = conn.CreateCommand();
             idCmd.CommandText = "SELECT id FROM conv_sessions WHERE external_id = @eid";
             idCmd.Parameters.AddWithValue("@eid", externalId);
-            var result = await idCmd.ExecuteScalarAsync();
+            var result = await idCmd.ExecuteScalarAsync(ct);
             return result is long newId ? newId : null;
         }
         catch { return null; }
