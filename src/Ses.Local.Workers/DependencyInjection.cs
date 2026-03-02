@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Options;
 using Ses.Local.Workers.Services;
+using Ses.Local.Workers.Workers;
 
 namespace Ses.Local.Workers;
 
@@ -144,6 +145,10 @@ public static class DependencyInjection
         });
 
         services.AddSingleton<SesMcpManager>();
+
+        // Observation compression pipeline — Layer 1 (rule-based, always runs)
+        services.AddSingleton<IObservationCompressor, RuleBasedCompressor>();
+        services.AddHostedService<CompressionWorker>();
 
         return services;
     }
