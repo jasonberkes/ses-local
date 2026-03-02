@@ -9,9 +9,9 @@ namespace Ses.Local.Hooks.Handlers;
 /// </summary>
 internal static class PreCompactHandler
 {
-    internal static async Task RunAsync()
+    internal static async Task RunAsync(CancellationToken ct = default)
     {
-        var json = await Console.In.ReadToEndAsync();
+        var json = await Console.In.ReadToEndAsync(ct);
         if (string.IsNullOrWhiteSpace(json)) return;
 
         Dictionary<string, object>? input;
@@ -37,14 +37,15 @@ internal static class PreCompactHandler
             decisions.Add(contextSummary.Length > 1000 ? contextSummary[..1000] : contextSummary);
         }
 
-        using var ctx = await HookContext.CreateAsync();
+        using var ctx = await HookContext.CreateAsync(ct);
         foreach (var decision in decisions)
         {
             await ctx.SaveObservationAsync(
                 sessionId,
                 decision.Trim(),
                 "pre_compact_decision",
-                importance: 0.9); // high importance — persisted before compaction
+                importance: 0.9, // high importance — persisted before compaction
+                ct: ct);
         }
     }
 

@@ -9,9 +9,9 @@ namespace Ses.Local.Hooks.Handlers;
 /// </summary>
 internal static class PostToolUseHandler
 {
-    internal static async Task RunAsync()
+    internal static async Task RunAsync(CancellationToken ct = default)
     {
-        var json = await Console.In.ReadToEndAsync();
+        var json = await Console.In.ReadToEndAsync(ct);
         if (string.IsNullOrWhiteSpace(json)) return;
 
         Dictionary<string, object>? input;
@@ -26,8 +26,8 @@ internal static class PostToolUseHandler
 
         var content = $"Tool: {tool}\nInput: {inputSummary}\nOutput: {output}";
 
-        using var ctx = await HookContext.CreateAsync();
-        await ctx.SaveObservationAsync(sessionId, content, "tool_use", tool, importance: 0.4);
+        using var ctx = await HookContext.CreateAsync(ct);
+        await ctx.SaveObservationAsync(sessionId, content, "tool_use", tool, importance: 0.4, ct: ct);
     }
 
     private static string SummarizeInput(object? input)
