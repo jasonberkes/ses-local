@@ -51,4 +51,16 @@ public interface ILocalDbService
     /// Used by the compression worker to find work.
     /// </summary>
     Task<IReadOnlyList<long>> GetSessionsWithoutSummaryAsync(int batchSize = 10, CancellationToken ct = default);
+
+    /// <summary>
+    /// Inserts or ignores a batch of causal/temporal links between observations.
+    /// Conflict key: (source_observation_id, target_observation_id, link_type).
+    /// </summary>
+    Task CreateObservationLinksAsync(IEnumerable<ObservationLink> links, CancellationToken ct = default);
+
+    /// <summary>
+    /// Walks the observation link graph starting from <paramref name="observationId"/> up to
+    /// <paramref name="maxDepth"/> hops and returns all links encountered (BFS).
+    /// </summary>
+    Task<IReadOnlyList<ObservationLink>> GetCausalChainAsync(long observationId, int maxDepth = 5, CancellationToken ct = default);
 }

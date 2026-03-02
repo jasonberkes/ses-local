@@ -305,6 +305,106 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         }
     }
 
+    public async Task CreateObservationLinksAsync(IEnumerable<ObservationLink> links, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var tx = conn.BeginTransaction();
+        try
+        {
+            foreach (var link in links)
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = """
+                    INSERT INTO conv_observation_links
+                        (source_observation_id, target_observation_id, link_type, confidence, created_at)
+                    VALUES
+                        (@source, @target, @link_type, @confidence, @created_at)
+                    ON CONFLICT(source_observation_id, target_observation_id, link_type) DO NOTHING
+                    """;
+                cmd.Parameters.AddWithValue("@source",     link.SourceObservationId);
+                cmd.Parameters.AddWithValue("@target",     link.TargetObservationId);
+                cmd.Parameters.AddWithValue("@link_type",  link.LinkType);
+                cmd.Parameters.AddWithValue("@confidence", link.Confidence);
+                cmd.Parameters.AddWithValue("@created_at", link.CreatedAt.ToString("O"));
+                await cmd.ExecuteNonQueryAsync(ct);
+
+                // Sync back the DB-assigned Id
+                if (link.Id == 0)
+                {
+                    await using var idCmd = conn.CreateCommand();
+                    idCmd.Transaction = tx;
+                    idCmd.CommandText = """
+                        SELECT id FROM conv_observation_links
+                        WHERE source_observation_id = @source AND target_observation_id = @target AND link_type = @link_type
+                        """;
+                    idCmd.Parameters.AddWithValue("@source",    link.SourceObservationId);
+                    idCmd.Parameters.AddWithValue("@target",    link.TargetObservationId);
+                    idCmd.Parameters.AddWithValue("@link_type", link.LinkType);
+                    var result = await idCmd.ExecuteScalarAsync(ct);
+                    if (result is long id) link.Id = id;
+                }
+            }
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    public async Task<IReadOnlyList<ObservationLink>> GetCausalChainAsync(long observationId, int maxDepth = 5, CancellationToken ct = default)
+    {
+        var conn        = await GetConnectionAsync(ct);
+        var visitedObs  = new HashSet<long> { observationId };
+        var visitedLinks = new HashSet<long>();
+        var queue       = new Queue<long>();
+        var result      = new List<ObservationLink>();
+
+        queue.Enqueue(observationId);
+        int depth = 0;
+
+        while (queue.Count > 0 && depth < maxDepth)
+        {
+            int levelCount = queue.Count;
+            depth++;
+
+            for (int i = 0; i < levelCount; i++)
+            {
+                long current = queue.Dequeue();
+
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = """
+                    SELECT id, source_observation_id, target_observation_id, link_type, confidence, created_at
+                    FROM conv_observation_links
+                    WHERE source_observation_id = @id OR target_observation_id = @id
+                    """;
+                cmd.Parameters.AddWithValue("@id", current);
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    var link = MapLink(reader);
+
+                    if (!visitedLinks.Add(link.Id))
+                        continue; // Already included this link
+
+                    result.Add(link);
+
+                    long neighbor = link.SourceObservationId == current
+                        ? link.TargetObservationId
+                        : link.SourceObservationId;
+
+                    if (visitedObs.Add(neighbor))
+                        queue.Enqueue(neighbor);
+                }
+            }
+        }
+
+        return result;
+    }
+
     // ── Schema ────────────────────────────────────────────────────────────────
 
     private async Task EnsureSchemaAsync(SqliteConnection conn, CancellationToken ct)
@@ -333,6 +433,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         {
             await ApplyMigration3Async(conn, ct);
             await SetUserVersionAsync(conn, 3, ct);
+        }
+
+        if (version < 4)
+        {
+            await ApplyMigration4Async(conn, ct);
+            await SetUserVersionAsync(conn, 4, ct);
         }
     }
 
@@ -431,6 +537,26 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
                 created_at TEXT NOT NULL
             )
             """, ct);
+    }
+
+    private static async Task ApplyMigration4Async(SqliteConnection conn, CancellationToken ct)
+    {
+        // conv_observation_links — directed causal/temporal links between observations (WI-983)
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE IF NOT EXISTS conv_observation_links (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_observation_id INTEGER NOT NULL REFERENCES conv_observations(id) ON DELETE CASCADE,
+                target_observation_id INTEGER NOT NULL REFERENCES conv_observations(id) ON DELETE CASCADE,
+                link_type             TEXT NOT NULL,
+                confidence            REAL NOT NULL DEFAULT 1.0,
+                created_at            TEXT NOT NULL,
+                UNIQUE(source_observation_id, target_observation_id, link_type)
+            )
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_links_source ON conv_observation_links(source_observation_id)", ct);
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_links_target ON conv_observation_links(target_observation_id)", ct);
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_links_type ON conv_observation_links(link_type)", ct);
     }
 
     private static async Task ApplyMigration2Async(SqliteConnection conn, CancellationToken ct)
@@ -764,6 +890,16 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         SequenceNumber       = r.GetInt32(7),
         ParentObservationId  = r.IsDBNull(8) ? null : r.GetInt64(8),
         CreatedAt            = DateTime.Parse(r.GetString(9))
+    };
+
+    private static ObservationLink MapLink(SqliteDataReader r) => new()
+    {
+        Id                   = r.GetInt64(0),
+        SourceObservationId  = r.GetInt64(1),
+        TargetObservationId  = r.GetInt64(2),
+        LinkType             = r.GetString(3),
+        Confidence           = r.GetDouble(4),
+        CreatedAt            = DateTime.Parse(r.GetString(5))
     };
 
     public async ValueTask DisposeAsync()
