@@ -161,6 +161,134 @@ public sealed class LocalDbServiceTests : IAsyncDisposable
         Assert.True(results.Count <= 3);
     }
 
+    // ── ObservationLink tests (WI-983) ────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateObservationLinksAsync_StoresLinks()
+    {
+        var session = await CreateSessionWithObservationsAsync(2);
+        var obs = await _sut.GetObservationsAsync(session.Id);
+        Assert.Equal(2, obs.Count);
+
+        var link = new ObservationLink
+        {
+            SourceObservationId = obs[0].Id,
+            TargetObservationId = obs[1].Id,
+            LinkType            = "causes",
+            Confidence          = 0.7,
+            CreatedAt           = DateTime.UtcNow
+        };
+
+        await _sut.CreateObservationLinksAsync([link]);
+
+        Assert.True(link.Id > 0, "Id should be synced back after insert");
+    }
+
+    [Fact]
+    public async Task CreateObservationLinksAsync_DuplicateLink_IsIgnored()
+    {
+        var session = await CreateSessionWithObservationsAsync(2);
+        var obs = await _sut.GetObservationsAsync(session.Id);
+
+        var link = new ObservationLink
+        {
+            SourceObservationId = obs[0].Id,
+            TargetObservationId = obs[1].Id,
+            LinkType            = "fixes",
+            Confidence          = 0.9,
+            CreatedAt           = DateTime.UtcNow
+        };
+
+        // Should not throw on duplicate
+        await _sut.CreateObservationLinksAsync([link]);
+        await _sut.CreateObservationLinksAsync([new ObservationLink
+        {
+            SourceObservationId = obs[0].Id,
+            TargetObservationId = obs[1].Id,
+            LinkType            = "fixes",
+            Confidence          = 0.9,
+            CreatedAt           = DateTime.UtcNow
+        }]);
+    }
+
+    [Fact]
+    public async Task GetCausalChainAsync_ReturnsLinksReachableFromStart()
+    {
+        var session = await CreateSessionWithObservationsAsync(3);
+        var obs = await _sut.GetObservationsAsync(session.Id);
+
+        // obs[0] → obs[1] → obs[2]
+        await _sut.CreateObservationLinksAsync([
+            new ObservationLink { SourceObservationId = obs[0].Id, TargetObservationId = obs[1].Id, LinkType = "causes",  Confidence = 0.7, CreatedAt = DateTime.UtcNow },
+            new ObservationLink { SourceObservationId = obs[1].Id, TargetObservationId = obs[2].Id, LinkType = "follows", Confidence = 0.8, CreatedAt = DateTime.UtcNow }
+        ]);
+
+        var chain = await _sut.GetCausalChainAsync(obs[0].Id, maxDepth: 5);
+
+        Assert.Equal(2, chain.Count);
+        Assert.Contains(chain, l => l.SourceObservationId == obs[0].Id && l.TargetObservationId == obs[1].Id);
+        Assert.Contains(chain, l => l.SourceObservationId == obs[1].Id && l.TargetObservationId == obs[2].Id);
+    }
+
+    [Fact]
+    public async Task GetCausalChainAsync_RespectsMaxDepth()
+    {
+        var session = await CreateSessionWithObservationsAsync(4);
+        var obs = await _sut.GetObservationsAsync(session.Id);
+
+        // Chain: obs[0] → obs[1] → obs[2] → obs[3]
+        await _sut.CreateObservationLinksAsync([
+            new ObservationLink { SourceObservationId = obs[0].Id, TargetObservationId = obs[1].Id, LinkType = "causes",  Confidence = 0.7, CreatedAt = DateTime.UtcNow },
+            new ObservationLink { SourceObservationId = obs[1].Id, TargetObservationId = obs[2].Id, LinkType = "follows", Confidence = 0.8, CreatedAt = DateTime.UtcNow },
+            new ObservationLink { SourceObservationId = obs[2].Id, TargetObservationId = obs[3].Id, LinkType = "related", Confidence = 0.5, CreatedAt = DateTime.UtcNow }
+        ]);
+
+        // With maxDepth=1, should only find the first hop from obs[0]
+        var chain = await _sut.GetCausalChainAsync(obs[0].Id, maxDepth: 1);
+        Assert.Single(chain);
+        Assert.Equal(obs[0].Id, chain[0].SourceObservationId);
+        Assert.Equal(obs[1].Id, chain[0].TargetObservationId);
+    }
+
+    [Fact]
+    public async Task GetCausalChainAsync_NoLinks_ReturnsEmpty()
+    {
+        var session = await CreateSessionWithObservationsAsync(1);
+        var obs = await _sut.GetObservationsAsync(session.Id);
+
+        var chain = await _sut.GetCausalChainAsync(obs[0].Id);
+        Assert.Empty(chain);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private async Task<ConversationSession> CreateSessionWithObservationsAsync(int observationCount)
+    {
+        var session = new ConversationSession
+        {
+            Source     = ConversationSource.ClaudeCode,
+            ExternalId = Guid.NewGuid().ToString(),
+            Title      = "Test session",
+            CreatedAt  = DateTime.UtcNow,
+            UpdatedAt  = DateTime.UtcNow
+        };
+        await _sut.UpsertSessionAsync(session);
+
+        var observations = Enumerable.Range(0, observationCount).Select(i => new ConversationObservation
+        {
+            SessionId       = session.Id,
+            ObservationType = ObservationType.ToolUse,
+            ToolName        = "Read",
+            FilePath        = $"/src/File{i}.cs",
+            Content         = $"Content {i}",
+            SequenceNumber  = i,
+            CreatedAt       = DateTime.UtcNow
+        }).ToList();
+
+        await _sut.UpsertObservationsAsync(observations);
+        return session;
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _sut.DisposeAsync();
