@@ -11,6 +11,7 @@ using Ses.Local.Tray.Converters;
 using Ses.Local.Tray.Services;
 using Ses.Local.Tray.ViewModels;
 using Ses.Local.Tray.Views;
+using Microsoft.Extensions.Logging;
 
 namespace Ses.Local.Tray;
 
@@ -23,6 +24,7 @@ public partial class TrayApp : Application
     private NativeMenuItem?     _signInItem;
     private NativeMenuItem?     _licenseItem;
     private NativeMenuItem?     _importItem;
+    private NativeMenuItem?     _mcpItem;
     private DispatcherTimer?    _statusTimer;
 
     public static readonly DotColorConverter DotColorConverterInstance = new();
@@ -64,6 +66,10 @@ public partial class TrayApp : Application
             _importItem = new NativeMenuItem("Import Conversations...");
             _importItem.Click += OnImportConversationsClicked;
             menu.Items.Add(_importItem);
+
+            _mcpItem = new NativeMenuItem("Configure MCP Servers...");
+            _mcpItem.Click += OnConfigureMcpClicked;
+            menu.Items.Add(_mcpItem);
 
             menu.Items.Add(new NativeMenuItemSeparator());
 
@@ -236,6 +242,52 @@ public partial class TrayApp : Application
         {
             _importItem.Header    = "Import Conversations...";
             _importItem.IsEnabled = true;
+        }
+    }
+
+    private async void OnConfigureMcpClicked(object? sender, EventArgs e)
+    {
+        if (_services is null || _mcpItem is null) return;
+
+        var mcp = _services.GetRequiredService<IMcpConfigManager>();
+
+        _mcpItem.Header    = "Configuring MCP Servers...";
+        _mcpItem.IsEnabled = false;
+
+        try
+        {
+            var provisioned = await mcp.ProvisionSesMcpAsync();
+
+            if (provisioned.Count == 0)
+            {
+                _mcpItem.Header = "✕ No supported MCP hosts detected";
+            }
+            else
+            {
+                var names = string.Join(", ", provisioned.Select(h => h.Host switch
+                {
+                    Core.Models.McpHost.ClaudeDesktop  => "Claude Desktop",
+                    Core.Models.McpHost.ClaudeCode     => "Claude Code",
+                    Core.Models.McpHost.Cursor         => "Cursor",
+                    Core.Models.McpHost.VsCodeContinue => "VS Code/Continue",
+                    _                                  => h.Host.ToString()
+                }));
+                _mcpItem.Header = $"✓ ses-mcp configured for {names}";
+            }
+
+            _ = Task.Delay(TimeSpan.FromSeconds(6)).ContinueWith(_ =>
+                Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    _mcpItem.Header    = "Configure MCP Servers...";
+                    _mcpItem.IsEnabled = true;
+                }));
+        }
+        catch (Exception ex)
+        {
+            _services.GetService<ILogger<TrayApp>>()
+                ?.LogWarning(ex, "MCP provisioning failed");
+            _mcpItem.Header    = "Configure MCP Servers...";
+            _mcpItem.IsEnabled = true;
         }
     }
 
