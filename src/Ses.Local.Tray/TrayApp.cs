@@ -22,6 +22,7 @@ public partial class TrayApp : Application
     private NativeMenuItem?     _statusItem;
     private NativeMenuItem?     _signInItem;
     private NativeMenuItem?     _licenseItem;
+    private NativeMenuItem?     _importItem;
     private DispatcherTimer?    _statusTimer;
 
     public static readonly DotColorConverter DotColorConverterInstance = new();
@@ -59,6 +60,10 @@ public partial class TrayApp : Application
             var openItem = new NativeMenuItem("Open ses-local");
             openItem.Click += (_, _) => ShowWindow();
             menu.Items.Add(openItem);
+
+            _importItem = new NativeMenuItem("Import Conversations...");
+            _importItem.Click += OnImportConversationsClicked;
+            menu.Items.Add(_importItem);
 
             menu.Items.Add(new NativeMenuItemSeparator());
 
@@ -162,6 +167,76 @@ public partial class TrayApp : Application
             Dispatcher.UIThread.InvokeAsync(() => UpdateStatusAsync());
         };
         _licenseWindow.Show();
+    }
+
+    private async void OnImportConversationsClicked(object? sender, EventArgs e)
+    {
+        if (_services is null || _importItem is null) return;
+
+        var proxy = _services.GetRequiredService<DaemonAuthProxy>();
+
+        // Show file picker on the UI thread via a temporary host window
+        var filePath = await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            // Avalonia 11 requires a TopLevel to access StorageProvider
+            var owner = new Window
+            {
+                ShowInTaskbar = false,
+                WindowState   = WindowState.Normal,
+                Width         = 1,
+                Height        = 1,
+                Opacity       = 0
+            };
+            owner.Show();
+
+            var topLevel = TopLevel.GetTopLevel(owner);
+            if (topLevel is null) { owner.Close(); return null; }
+
+            var files = await topLevel.StorageProvider.OpenFilePickerAsync(
+                new Avalonia.Platform.Storage.FilePickerOpenOptions
+                {
+                    Title         = "Select Claude Export JSON",
+                    AllowMultiple = false,
+                    FileTypeFilter =
+                    [
+                        new Avalonia.Platform.Storage.FilePickerFileType("JSON files")
+                        {
+                            Patterns = ["*.json"]
+                        }
+                    ]
+                });
+
+            owner.Close();
+            return files.Count > 0 ? files[0].Path.LocalPath : null;
+        });
+
+        if (filePath is null) return;
+
+        // Update menu item to show progress
+        _importItem.Header   = "Importing...";
+        _importItem.IsEnabled = false;
+
+        try
+        {
+            var result = await proxy.ImportConversationsAsync(filePath);
+
+            _importItem.Header = result is not null
+                ? $"✓ Imported {result.SessionsImported} conversations"
+                : "✕ Import failed (daemon unavailable)";
+
+            // Reset header after a few seconds
+            _ = Task.Delay(TimeSpan.FromSeconds(6)).ContinueWith(_ =>
+                Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    _importItem.Header    = "Import Conversations...";
+                    _importItem.IsEnabled = true;
+                }));
+        }
+        catch (Exception)
+        {
+            _importItem.Header    = "Import Conversations...";
+            _importItem.IsEnabled = true;
+        }
     }
 
     private async void OnStopDaemonClicked(object? sender, EventArgs e)

@@ -10,6 +10,7 @@ using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
 using Ses.Local.Core.Services;
 using Ses.Local.Workers;
+using Ses.Local.Workers.Services;
 using Ses.Local.Workers.Workers;
 
 namespace Ses.Local.Daemon;
@@ -105,6 +106,29 @@ internal static class Program
             });
         });
 
+        app.MapPost("/api/conversations/import", async (HttpContext ctx, ClaudeExportParser parser) =>
+        {
+            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<ImportConversationsRequest>(
+                ctx.Request.Body,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (body is null || string.IsNullOrWhiteSpace(body.FilePath))
+                return Results.BadRequest(new { error = "filePath is required." });
+
+            if (!File.Exists(body.FilePath))
+                return Results.BadRequest(new { error = "File not found." });
+
+            var result = await parser.ImportAsync(body.FilePath, ct: ctx.RequestAborted);
+
+            return Results.Ok(new
+            {
+                sessionsImported = result.SessionsImported,
+                messagesImported = result.MessagesImported,
+                duplicates       = result.Duplicates,
+                errors           = result.Errors
+            });
+        });
+
         app.MapPost("/api/signout", async (IAuthService auth) =>
         {
             await auth.SignOutAsync();
@@ -190,4 +214,9 @@ internal static class Program
 internal sealed record LicenseActivateRequest
 {
     public string LicenseKey { get; init; } = string.Empty;
+}
+
+internal sealed record ImportConversationsRequest
+{
+    public string FilePath { get; init; } = string.Empty;
 }

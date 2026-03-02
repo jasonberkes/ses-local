@@ -153,6 +153,9 @@ public static class DependencyInjection
         // CLAUDE.md auto-generation (WI-982)
         services.AddSingleton<IClaudeMdGenerator, ClaudeMdGenerator>();
 
+        // Claude.ai export importer (WI-985)
+        services.AddSingleton<ClaudeExportParser>();
+
         return services;
     }
 }

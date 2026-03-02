@@ -15,6 +15,7 @@ namespace Ses.Local.Tray.Services;
 public sealed class DaemonAuthProxy : IAuthService, IDisposable
 {
     private readonly HttpClient _http;
+    private readonly HttpClient _longRunHttp; // separate client for long-running operations (e.g. bulk import)
     private readonly string _loginUrl;
 
     public DaemonAuthProxy(IOptions<SesLocalOptions> options)
@@ -37,6 +38,24 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
             BaseAddress = new Uri("http://ses-local-daemon"),
             Timeout     = TimeSpan.FromSeconds(5)
         };
+
+        // Long-running operations (import of thousands of conversations) need more headroom
+        var longRunHandler = new SocketsHttpHandler
+        {
+            ConnectCallback = async (context, ct) =>
+            {
+                var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                var endpoint = new UnixDomainSocketEndPoint(sockPath);
+                await socket.ConnectAsync(endpoint, ct);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+        };
+        _longRunHttp = new HttpClient(longRunHandler)
+        {
+            BaseAddress = new Uri("http://ses-local-daemon"),
+            Timeout     = TimeSpan.FromMinutes(15)
+        };
+
         _loginUrl = options.Value.IdentityBaseUrl.TrimEnd('/') + "/api/v1/install/login?reauth=true";
     }
 
@@ -117,7 +136,37 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
     public Task<string?> GetPatAsync(CancellationToken ct = default)
         => Task.FromResult<string?>(null); // Tray doesn't need PATs
 
-    public void Dispose() => _http.Dispose();
+    /// <summary>
+    /// Sends a Claude.ai export file to the daemon for import into local.db.
+    /// Returns null if the daemon is unreachable.
+    /// </summary>
+    public async Task<ImportConversationsResult?> ImportConversationsAsync(
+        string filePath, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _longRunHttp.PostAsJsonAsync(
+                "/api/conversations/import",
+                new { filePath },
+                ct);
+
+            if (!response.IsSuccessStatusCode) return null;
+
+            return await response.Content.ReadFromJsonAsync<ImportConversationsResult>(
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+                ct);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    public void Dispose()
+    {
+        _http.Dispose();
+        _longRunHttp.Dispose();
+    }
 
     private sealed class DaemonStatusDto
     {
@@ -127,4 +176,13 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         public string LicenseStatus { get; set; } = string.Empty;
         public string Uptime { get; set; } = string.Empty;
     }
+}
+
+/// <summary>Result DTO returned by the daemon's /api/conversations/import endpoint.</summary>
+public sealed class ImportConversationsResult
+{
+    public int SessionsImported { get; set; }
+    public int MessagesImported { get; set; }
+    public int Duplicates       { get; set; }
+    public int Errors           { get; set; }
 }
