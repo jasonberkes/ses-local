@@ -23,7 +23,7 @@ public sealed class IdentityClient
         try
         {
             var response = await _http.PostAsJsonAsync(
-                "api/v1/auth/refresh",
+                "api/v1/install/refresh",
                 new { refreshToken },
                 s_json, ct);
 
