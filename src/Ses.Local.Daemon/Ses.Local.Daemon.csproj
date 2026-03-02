@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>ses-local-daemon</AssemblyName>
@@ -6,6 +6,5 @@
   <ItemGroup>
     <ProjectReference Include="..\Ses.Local.Core\Ses.Local.Core.csproj" />
     <ProjectReference Include="..\Ses.Local.Workers\Ses.Local.Workers.csproj" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 </Project>

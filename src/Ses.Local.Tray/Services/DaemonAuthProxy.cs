@@ -1,21 +1,39 @@
 using System.Net.Http.Json;
+using System.Net.Sockets;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Services;
 
 namespace Ses.Local.Tray.Services;
 
 /// <summary>
-/// Implements <see cref="IAuthService"/> by calling the daemon's HTTP API.
-/// Used by the tray GUI to get auth state and trigger actions without
-/// directly depending on the Workers project.
+/// Implements <see cref="IAuthService"/> by calling the daemon's IPC endpoints
+/// over a Unix domain socket (macOS/Linux) or named pipe (Windows).
 /// </summary>
-public sealed class DaemonAuthProxy : IAuthService
+public sealed class DaemonAuthProxy : IAuthService, IDisposable
 {
     private readonly HttpClient _http;
 
-    public DaemonAuthProxy(IHttpClientFactory factory)
+    public DaemonAuthProxy()
     {
-        _http = factory.CreateClient("daemon");
+        var sockPath = DaemonSocketPath.GetPath();
+        var handler = new SocketsHttpHandler
+        {
+            ConnectCallback = async (context, ct) =>
+            {
+                var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                var endpoint = new UnixDomainSocketEndPoint(sockPath);
+                await socket.ConnectAsync(endpoint, ct);
+                return new NetworkStream(socket, ownsSocket: true);
+            }
+        };
+
+        // Base address is required by HttpClient but ignored for UDS routing
+        _http = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://ses-local-daemon"),
+            Timeout     = TimeSpan.FromSeconds(5)
+        };
     }
 
     public async Task<SesAuthState> GetStateAsync(CancellationToken ct = default)
@@ -33,7 +51,7 @@ public sealed class DaemonAuthProxy : IAuthService
         }
         catch
         {
-            // Daemon not reachable
+            // Daemon not reachable (socket missing or refused)
             return SesAuthState.Unauthenticated;
         }
     }
@@ -42,6 +60,15 @@ public sealed class DaemonAuthProxy : IAuthService
     {
         try { await _http.PostAsync("/api/signout", null, ct); }
         catch { /* daemon unreachable */ }
+    }
+
+    /// <summary>
+    /// Request graceful daemon shutdown over the IPC socket.
+    /// </summary>
+    public async Task ShutdownAsync(CancellationToken ct = default)
+    {
+        try { await _http.PostAsync("/api/shutdown", null, ct); }
+        catch { /* daemon already stopped */ }
     }
 
     public Task TriggerReauthAsync(CancellationToken ct = default)
@@ -62,6 +89,8 @@ public sealed class DaemonAuthProxy : IAuthService
 
     public Task<string?> GetPatAsync(CancellationToken ct = default)
         => Task.FromResult<string?>(null); // Tray doesn't need PATs
+
+    public void Dispose() => _http.Dispose();
 
     private sealed class DaemonStatusDto
     {

@@ -22,12 +22,9 @@ internal static class Program
         var host = Host.CreateDefaultBuilder(args)
             .ConfigureServices((_, services) =>
             {
-                services.AddHttpClient("daemon", client =>
-                {
-                    client.BaseAddress = new Uri("http://localhost:37780/");
-                    client.Timeout = TimeSpan.FromSeconds(5);
-                });
-                services.AddSingleton<IAuthService, DaemonAuthProxy>();
+                // DaemonAuthProxy connects to daemon via Unix domain socket
+                services.AddSingleton<DaemonAuthProxy>();
+                services.AddSingleton<IAuthService>(sp => sp.GetRequiredService<DaemonAuthProxy>());
             })
             .Build();
 

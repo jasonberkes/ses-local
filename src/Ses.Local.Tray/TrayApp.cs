@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Tray.Converters;
+using Ses.Local.Tray.Services;
 using Ses.Local.Tray.ViewModels;
 using Ses.Local.Tray.Views;
 
@@ -120,13 +121,8 @@ public partial class TrayApp : Application
     private async void OnStopDaemonClicked(object? sender, EventArgs e)
     {
         if (_services is null) return;
-        try
-        {
-            var factory = _services.GetRequiredService<IHttpClientFactory>();
-            var http = factory.CreateClient("daemon");
-            await http.PostAsync("/api/shutdown", null);
-        }
-        catch { /* daemon already stopped */ }
+        var proxy = _services.GetRequiredService<DaemonAuthProxy>();
+        await proxy.ShutdownAsync();
     }
 
     private void OnTrayIconClicked(object? sender, EventArgs e) => ShowWindow();
