@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -24,6 +25,8 @@ public sealed class BrowserExtensionListener : BackgroundService
     private readonly IAuthService _auth;
     private readonly ILogger<BrowserExtensionListener> _logger;
     private readonly SesLocalOptions _options;
+    private readonly IHostApplicationLifetime _lifetime;
+    private readonly long _startTimestamp = Stopwatch.GetTimestamp();
 
     private const int Port = 37780;
 
@@ -31,12 +34,14 @@ public sealed class BrowserExtensionListener : BackgroundService
         ILocalDbService db,
         IAuthService auth,
         ILogger<BrowserExtensionListener> logger,
-        IOptions<SesLocalOptions> options)
+        IOptions<SesLocalOptions> options,
+        IHostApplicationLifetime lifetime)
     {
-        _db      = db;
-        _auth    = auth;
-        _logger  = logger;
-        _options = options.Value;
+        _db       = db;
+        _auth     = auth;
+        _logger   = logger;
+        _options  = options.Value;
+        _lifetime = lifetime;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -106,6 +111,31 @@ public sealed class BrowserExtensionListener : BackgroundService
                 return;
             }
 
+            // Daemon status endpoint — used by tray GUI to poll health
+            if (req.HttpMethod == "GET" && req.Url?.AbsolutePath == "/api/status")
+            {
+                await HandleStatusAsync(resp, ct);
+                return;
+            }
+
+            // Sign out — used by tray to clear auth state in daemon
+            if (req.HttpMethod == "POST" && req.Url?.AbsolutePath == "/api/signout")
+            {
+                await _auth.SignOutAsync(ct);
+                resp.StatusCode = 200;
+                await WriteJsonAsync(resp, new { message = "Signed out" });
+                return;
+            }
+
+            // Graceful shutdown — used by tray "Stop Daemon" menu item
+            if (req.HttpMethod == "POST" && req.Url?.AbsolutePath == "/api/shutdown")
+            {
+                resp.StatusCode = 200;
+                await WriteJsonAsync(resp, new { message = "Shutting down" });
+                _lifetime.StopApplication();
+                return;
+            }
+
             // Only accept POST /api/sync/conversations
             if (req.HttpMethod != "POST" || req.Url?.AbsolutePath != "/api/sync/conversations")
             {
@@ -149,6 +179,29 @@ public sealed class BrowserExtensionListener : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Extension listener: request handler error");
+            resp.StatusCode = 500;
+            resp.Close();
+        }
+    }
+
+    private async Task HandleStatusAsync(HttpListenerResponse resp, CancellationToken ct)
+    {
+        try
+        {
+            var state  = await _auth.GetStateAsync(ct);
+            var uptime = Stopwatch.GetElapsedTime(_startTimestamp);
+
+            resp.StatusCode = 200;
+            await WriteJsonAsync(resp, new
+            {
+                authenticated = state.IsAuthenticated,
+                needsReauth   = state.NeedsReauth,
+                uptime        = uptime.ToString(@"d\.hh\:mm\:ss")
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to build status response");
             resp.StatusCode = 500;
             resp.Close();
         }
@@ -309,6 +362,14 @@ public sealed class ExtensionMessage
     [JsonPropertyName("created_at")] public DateTime CreatedAt { get; set; }
 }
 
+public sealed class DaemonStatusResponse
+{
+    [JsonPropertyName("authenticated")] public bool Authenticated { get; set; }
+    [JsonPropertyName("needsReauth")]   public bool NeedsReauth   { get; set; }
+    [JsonPropertyName("uptime")]        public string Uptime       { get; set; } = string.Empty;
+}
+
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(ExtensionSyncPayload))]
+[JsonSerializable(typeof(DaemonStatusResponse))]
 internal partial class ExtensionPayloadJsonContext : JsonSerializerContext { }

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for ses-local daemon.
+
+  Install to ~/Library/LaunchAgents/com.supereasysoftware.ses-local.plist
+  NOTE: launchd does NOT expand ~ in paths. The installer must replace
+  __HOME__ with the user's actual home directory before copying this file.
+
+  Load:   launchctl load   ~/Library/LaunchAgents/com.supereasysoftware.ses-local.plist
+  Unload: launchctl unload ~/Library/LaunchAgents/com.supereasysoftware.ses-local.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.supereasysoftware.ses-local</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__HOME__/.ses/ses-local-daemon</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>__HOME__/.ses/logs/daemon.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>__HOME__/.ses/logs/daemon.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+</dict>
+</plist>

@@ -52,7 +52,11 @@ public partial class TrayApp : Application
 
             menu.Items.Add(new NativeMenuItemSeparator());
 
-            var quitItem = new NativeMenuItem("Quit");
+            var stopDaemonItem = new NativeMenuItem("Stop Daemon");
+            stopDaemonItem.Click += OnStopDaemonClicked;
+            menu.Items.Add(stopDaemonItem);
+
+            var quitItem = new NativeMenuItem("Quit Tray");
             quitItem.Click += (_, _) => desktop.Shutdown();
             menu.Items.Add(quitItem);
 
@@ -101,8 +105,8 @@ public partial class TrayApp : Application
         }
         catch
         {
-            _statusItem.Header     = "○ Not connected";
-            _signInItem!.IsVisible = true;
+            _statusItem.Header     = "✕ Daemon not running";
+            _signInItem!.IsVisible = false;
         }
     }
 
@@ -111,6 +115,18 @@ public partial class TrayApp : Application
         if (_services is null) return;
         var auth = _services.GetRequiredService<IAuthService>();
         await auth.TriggerReauthAsync();
+    }
+
+    private async void OnStopDaemonClicked(object? sender, EventArgs e)
+    {
+        if (_services is null) return;
+        try
+        {
+            var factory = _services.GetRequiredService<IHttpClientFactory>();
+            var http = factory.CreateClient("daemon");
+            await http.PostAsync("/api/shutdown", null);
+        }
+        catch { /* daemon already stopped */ }
     }
 
     private void OnTrayIconClicked(object? sender, EventArgs e) => ShowWindow();

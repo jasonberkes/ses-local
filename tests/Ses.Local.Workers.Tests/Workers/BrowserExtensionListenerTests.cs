@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -21,8 +22,9 @@ public sealed class BrowserExtensionListenerTests
         auth.Setup(x => x.GetPatAsync(It.IsAny<CancellationToken>())).ReturnsAsync("tm_pat_testtoken");
 
         var opts     = Options.Create(new SesLocalOptions());
+        var lifetime = new Mock<IHostApplicationLifetime>();
         var listener = new BrowserExtensionListener(db.Object, auth.Object,
-            NullLogger<BrowserExtensionListener>.Instance, opts);
+            NullLogger<BrowserExtensionListener>.Instance, opts, lifetime.Object);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         _ = listener.StartAsync(cts.Token);
@@ -70,8 +72,9 @@ public sealed class BrowserExtensionListenerTests
         auth.Setup(x => x.GetPatAsync(It.IsAny<CancellationToken>())).ReturnsAsync("tm_pat_correct");
 
         var opts     = Options.Create(new SesLocalOptions());
+        var lifetime = new Mock<IHostApplicationLifetime>();
         var listener = new BrowserExtensionListener(db.Object, auth.Object,
-            NullLogger<BrowserExtensionListener>.Instance, opts);
+            NullLogger<BrowserExtensionListener>.Instance, opts, lifetime.Object);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
         _ = listener.StartAsync(cts.Token);

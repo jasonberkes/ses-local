@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Ses.Local.Core.Interfaces;
 
-namespace Ses.Local.Tray;
+namespace Ses.Local.Daemon;
 
 /// <summary>
 /// Handles incoming ses-local://auth?refresh=...&amp;access=... URIs.
