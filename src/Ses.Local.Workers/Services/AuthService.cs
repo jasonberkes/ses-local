@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
 using Ses.Local.Core.Options;
+using Ses.Local.Workers.Telemetry;
 
 namespace Ses.Local.Workers.Services;
 
@@ -131,10 +132,13 @@ public sealed class AuthService : IAuthService
         var result = await _identity.RefreshTokenAsync(refreshToken, ct);
         if (result is null)
         {
+            SesLocalMetrics.TokenRefreshes.Add(1, new KeyValuePair<string, object?>("result", "failure"));
             _logger.LogWarning("Token refresh failed — triggering re-auth");
             await TriggerReauthAsync(ct);
             return null;
         }
+
+        SesLocalMetrics.TokenRefreshes.Add(1, new KeyValuePair<string, object?>("result", "success"));
 
         // Rotate refresh token in keychain
         await _keychain.SetAsync(KeyRefresh, result.RefreshToken, ct);
