@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -13,9 +14,28 @@ namespace Ses.Local.Workers.Tests.Workers;
 
 public sealed class BrowserExtensionListenerTests
 {
+    /// <summary>Returns true if nothing is already listening on port 37780 (checks both IPv4 and IPv6).</summary>
+    private static bool IsPortFree()
+    {
+        foreach (var host in new[] { "localhost", "127.0.0.1" })
+        {
+            try
+            {
+                using var probe = new TcpClient();
+                probe.Connect(host, 37780);
+                return false; // Connection succeeded — port is in use
+            }
+            catch (SocketException) { /* connection refused — try next */ }
+        }
+        return true;
+    }
+
     [Fact]
     public async Task Listener_StartsAndRespondsToSync()
     {
+        // Skip gracefully if port 37780 is already in use (e.g., ses-local daemon running)
+        if (!IsPortFree()) return;
+
         var db   = new Mock<ILocalDbService>();
         var auth = new Mock<IAuthService>();
         auth.Setup(x => x.GetPatAsync(It.IsAny<CancellationToken>())).ReturnsAsync("tm_pat_testtoken");
