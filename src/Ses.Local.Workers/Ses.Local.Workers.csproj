@@ -26,6 +26,8 @@
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
 
     <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" />
   </ItemGroup>
 
   <!-- Windows.Security.Credentials.PasswordVault (WinRT) — Windows TFM only -->

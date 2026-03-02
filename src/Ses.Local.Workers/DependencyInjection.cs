@@ -156,6 +156,20 @@ public static class DependencyInjection
         // Claude.ai export importer (WI-985)
         services.AddSingleton<ClaudeExportParser>();
 
+        // Vector search — ONNX embedding + brute-force cosine similarity (WI-989)
+        // Model download client — 3 retries, 5 min total timeout (large binary download)
+        services.AddHttpClient<ModelDownloadService>()
+        .AddStandardResilienceHandler(options =>
+        {
+            options.Retry.MaxRetryAttempts = 3;
+            options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(3);
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(10);
+        });
+        services.AddSingleton<IModelDownloadService>(sp =>
+            sp.GetRequiredService<ModelDownloadService>());
+        services.AddSingleton<ILocalEmbeddingService, LocalEmbeddingService>();
+        services.AddSingleton<IVectorSearchService, VectorSearchService>();
+
         return services;
     }
 }
