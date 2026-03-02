@@ -500,6 +500,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             await ApplyMigration4Async(conn, ct);
             await SetUserVersionAsync(conn, 4, ct);
         }
+
+        if (version < 5)
+        {
+            await ApplyMigration5Async(conn, ct);
+            await SetUserVersionAsync(conn, 5, ct);
+        }
     }
 
     private static async Task ApplyMigration1Async(SqliteConnection conn, CancellationToken ct)
@@ -617,6 +623,18 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_links_source ON conv_observation_links(source_observation_id)", ct);
         await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_links_target ON conv_observation_links(target_observation_id)", ct);
         await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_links_type ON conv_observation_links(link_type)", ct);
+    }
+
+    private static async Task ApplyMigration5Async(SqliteConnection conn, CancellationToken ct)
+    {
+        // conv_embeddings — 384-dim float vectors stored as BLOBs for vector search (WI-989)
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE IF NOT EXISTS conv_embeddings (
+                session_id INTEGER PRIMARY KEY REFERENCES conv_sessions(id) ON DELETE CASCADE,
+                embedding  BLOB NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """, ct);
     }
 
     private static async Task ApplyMigration2Async(SqliteConnection conn, CancellationToken ct)
@@ -846,6 +864,80 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             results.Add(reader.GetInt64(0));
 
         return results;
+    }
+
+    // ── Vector Embeddings (WI-989) ────────────────────────────────────────────
+
+    public async Task UpsertEmbeddingAsync(long sessionId, float[] embedding, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO conv_embeddings (session_id, embedding, created_at)
+            VALUES (@session_id, @embedding, @created_at)
+            ON CONFLICT(session_id) DO UPDATE SET
+                embedding  = excluded.embedding,
+                created_at = excluded.created_at
+            """;
+        cmd.Parameters.AddWithValue("@session_id", sessionId);
+        cmd.Parameters.AddWithValue("@embedding", FloatArrayToBlob(embedding));
+        cmd.Parameters.AddWithValue("@created_at", DateTime.UtcNow.ToString("O"));
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<(long SessionId, float[] Embedding)>> GetAllEmbeddingsAsync(
+        CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT session_id, embedding FROM conv_embeddings";
+
+        var results = new List<(long, float[])>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var sessionId = reader.GetInt64(0);
+            var blob = (byte[])reader[1];
+            results.Add((sessionId, BlobToFloatArray(blob)));
+        }
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<long>> GetSessionsWithoutEmbeddingAsync(int batchSize = 10,
+        CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT s.session_id
+            FROM conv_session_summaries s
+            LEFT JOIN conv_embeddings e ON e.session_id = s.session_id
+            WHERE e.session_id IS NULL
+            LIMIT @batch
+            """;
+        cmd.Parameters.AddWithValue("@batch", batchSize);
+
+        var results = new List<long>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(reader.GetInt64(0));
+
+        return results;
+    }
+
+    private static byte[] FloatArrayToBlob(float[] vector)
+    {
+        var bytes = new byte[vector.Length * sizeof(float)];
+        Buffer.BlockCopy(vector, 0, bytes, 0, bytes.Length);
+        return bytes;
+    }
+
+    private static float[] BlobToFloatArray(byte[] blob)
+    {
+        var vector = new float[blob.Length / sizeof(float)];
+        Buffer.BlockCopy(blob, 0, vector, 0, blob.Length);
+        return vector;
     }
 
     // ── Connection management ─────────────────────────────────────────────────

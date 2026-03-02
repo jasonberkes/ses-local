@@ -63,6 +63,21 @@ public sealed class SesLocalOptions
     /// <summary>Project paths to exclude from CLAUDE.md generation (substring match).</summary>
     public IReadOnlyList<string> ClaudeMdExcludePaths { get; set; } = [];
 
+    // ── Vector Search (WI-989) ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Enable local vector search using ONNX embeddings.
+    /// When enabled, session summaries are embedded and searchable via cosine similarity.
+    /// </summary>
+    public bool EnableVectorSearch { get; set; }
+
+    /// <summary>
+    /// Path to the all-MiniLM-L6-v2 ONNX model file.
+    /// Downloaded automatically on first use if not present.
+    /// </summary>
+    public string EmbeddingModelPath { get; set; } =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ses", "models", "all-MiniLM-L6-v2.onnx");
+
     // ── Telemetry ─────────────────────────────────────────────────────────────
 
     /// <summary>

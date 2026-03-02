@@ -77,4 +77,21 @@ public interface ILocalDbService
     /// </summary>
     Task<IReadOnlyList<ConversationObservation>> GetRecentObservationsForSessionsAsync(
         IEnumerable<long> sessionIds, DateTime since, CancellationToken ct = default);
+
+    // ── Vector Embeddings (WI-989) ──────────────────────────────────────────
+
+    /// <summary>
+    /// Inserts or replaces the embedding vector for a session.
+    /// The vector is stored as a BLOB (IEEE 754 float[384]).
+    /// </summary>
+    Task UpsertEmbeddingAsync(long sessionId, float[] embedding, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns all stored embeddings for brute-force cosine similarity search.
+    /// Each entry is (sessionId, float[384]).
+    /// </summary>
+    Task<IReadOnlyList<(long SessionId, float[] Embedding)>> GetAllEmbeddingsAsync(CancellationToken ct = default);
+
+    /// <summary>Returns session IDs that have summaries but no embedding yet.</summary>
+    Task<IReadOnlyList<long>> GetSessionsWithoutEmbeddingAsync(int batchSize = 10, CancellationToken ct = default);
 }
