@@ -1,14 +1,15 @@
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Ses.Local.Core.Models;
-using TaskMaster.DocumentService.SDK.Clients;
-using TaskMaster.DocumentService.SDK.DTOs;
 
 namespace Ses.Local.Workers.Services;
 
 /// <summary>
 /// Uploads conversation transcripts to TaskMaster DocumentService as Transcript documents.
+/// Posts directly to the API (bypassing SDK v1.2.0 which has a TenantId int/Guid mismatch).
 /// </summary>
 public sealed class DocumentServiceUploader
 {
@@ -16,11 +17,16 @@ public sealed class DocumentServiceUploader
     private const string DocServiceUrl =
         "https://tm-documentservice-prod-eus2.redhill-040b1667.eastus2.azurecontainerapps.io";
 
-    // DocumentTypeId 4 = Transcript (from docs schema)
     private const int TranscriptTypeId = 4;
 
-    // Tenant ID for ses-local (int, not Guid)
-    private const int DefaultTenantId = 1;
+    // Super Easy Software tenant (docs.Tenants)
+    private const string DefaultTenantId = "73fd3e56-67ae-4389-a398-1f2b796b10d1";
+
+    private static readonly JsonSerializerOptions s_jsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
 
     public DocumentServiceUploader(ILogger<DocumentServiceUploader> logger)
         => _logger = logger;
@@ -37,7 +43,6 @@ public sealed class DocumentServiceUploader
         try
         {
             using var http = BuildHttpClient(pat);
-            var client     = new DocumentServiceClient(http);
 
             var transcript = FormatTranscript(session, messages);
             var metadataJson = JsonSerializer.Serialize(new
@@ -45,25 +50,41 @@ public sealed class DocumentServiceUploader
                 source       = session.Source.ToString(),
                 externalId   = session.ExternalId,
                 messageCount = messages.Count,
-                transcript   // embed in metadata until blob upload is wired
+                transcript
             });
 
-            var request = new CreateDocumentRequest
+            var payload = new
             {
-                TenantId       = DefaultTenantId,
-                DocumentTypeId = TranscriptTypeId,
-                Title          = session.Title ?? $"Conversation {session.ExternalId}",
-                Description    = $"{session.Source} conversation — {session.UpdatedAt:yyyy-MM-dd}",
-                ContentHash    = session.ContentHash,
-                MimeType       = "application/json",
-                Metadata       = metadataJson,
-                Tags           = $"{session.Source},conversation,sync",
-                CreatedBy      = "ses-local"
+                tenantId       = DefaultTenantId,
+                documentTypeId = TranscriptTypeId,
+                title          = session.Title ?? $"Conversation {session.ExternalId}",
+                description    = $"{session.Source} conversation — {session.UpdatedAt:yyyy-MM-dd}",
+                contentHash    = session.ContentHash,
+                mimeType       = "application/json",
+                metadata       = metadataJson,
+                tags           = $"{session.Source},conversation,sync",
+                createdBy      = "ses-local"
             };
 
-            var doc = await client.Documents.CreateAsync(request, ct);
-            _logger.LogDebug("Uploaded transcript for session {Id} → doc {DocId}", session.Id, doc.Id);
-            return doc.Id.ToString();
+            var json = JsonSerializer.Serialize(payload, s_jsonOptions);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var response = await http.PostAsync("api/v1/documents", content, ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning(
+                    "DocumentService returned {Status} for session {Id}: {Body}",
+                    (int)response.StatusCode, session.Id, body);
+                return null;
+            }
+
+            var responseJson = await response.Content.ReadAsStringAsync(ct);
+            using var doc = JsonDocument.Parse(responseJson);
+            var docId = doc.RootElement.GetProperty("id").ToString();
+
+            _logger.LogDebug("Uploaded transcript for session {Id} → doc {DocId}", session.Id, docId);
+            return docId;
         }
         catch (Exception ex)
         {
@@ -72,7 +93,7 @@ public sealed class DocumentServiceUploader
         }
     }
 
-    private static string FormatTranscript(ConversationSession session, IReadOnlyList<ConversationMessage> messages)
+    internal static string FormatTranscript(ConversationSession session, IReadOnlyList<ConversationMessage> messages)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"# {session.Title ?? "Untitled"}");
@@ -90,15 +111,15 @@ public sealed class DocumentServiceUploader
         return sb.ToString();
     }
 
-    private static System.Net.Http.HttpClient BuildHttpClient(string pat)
+    private static HttpClient BuildHttpClient(string pat)
     {
-        var http = new System.Net.Http.HttpClient
+        var http = new HttpClient
         {
             BaseAddress = new Uri(DocServiceUrl),
             Timeout     = TimeSpan.FromSeconds(30)
         };
         http.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", pat);
+            new AuthenticationHeaderValue("Bearer", pat);
         return http;
     }
 }
