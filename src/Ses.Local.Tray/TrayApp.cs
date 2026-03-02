@@ -14,11 +14,13 @@ namespace Ses.Local.Tray;
 
 public partial class TrayApp : Application
 {
-    private MainWindow?       _mainWindow;
-    private IServiceProvider? _services;
-    private NativeMenuItem?   _statusItem;
-    private NativeMenuItem?   _signInItem;
-    private DispatcherTimer?  _statusTimer;
+    private MainWindow?         _mainWindow;
+    private LicenseWindow?      _licenseWindow;
+    private IServiceProvider?   _services;
+    private NativeMenuItem?     _statusItem;
+    private NativeMenuItem?     _signInItem;
+    private NativeMenuItem?     _licenseItem;
+    private DispatcherTimer?    _statusTimer;
 
     public static readonly DotColorConverter DotColorConverterInstance = new();
 
@@ -46,6 +48,11 @@ public partial class TrayApp : Application
             _signInItem = new NativeMenuItem("Sign In...");
             _signInItem.Click += OnSignInClicked;
             menu.Items.Add(_signInItem);
+
+            _licenseItem = new NativeMenuItem("Enter License Key...");
+            _licenseItem.Click += OnLicenseKeyClicked;
+            _licenseItem.IsVisible = false;
+            menu.Items.Add(_licenseItem);
 
             var openItem = new NativeMenuItem("Open ses-local");
             openItem.Click += (_, _) => ShowWindow();
@@ -90,24 +97,38 @@ public partial class TrayApp : Application
             {
                 _statusItem.Header      = "● Connected";
                 _signInItem!.IsVisible  = false;
+                _licenseItem!.IsVisible = false;
+            }
+            else if (state.LicenseValid)
+            {
+                _statusItem.Header      = "● Licensed (Tier 1)";
+                _signInItem!.IsVisible  = false;
+                _licenseItem!.IsVisible = false;
             }
             else if (state.NeedsReauth)
             {
                 _statusItem.Header      = "⚠ Session expired";
                 _signInItem!.Header     = "Sign In Again...";
                 _signInItem!.IsVisible  = true;
+                _licenseItem!.IsVisible = true;
             }
             else
             {
-                _statusItem.Header      = "○ Not signed in";
+                _statusItem.Header      = "○ Not activated";
                 _signInItem!.Header     = "Sign In...";
                 _signInItem!.IsVisible  = true;
+                _licenseItem!.IsVisible = true;
+
+                // Auto-open license prompt on first run (no license, no OAuth)
+                if (_licenseWindow is null)
+                    await Dispatcher.UIThread.InvokeAsync(ShowLicenseWindow);
             }
         }
         catch
         {
-            _statusItem.Header     = "✕ Daemon not running";
-            _signInItem!.IsVisible = false;
+            _statusItem.Header      = "✕ Daemon not running";
+            _signInItem!.IsVisible  = false;
+            _licenseItem!.IsVisible = false;
         }
     }
 
@@ -116,6 +137,29 @@ public partial class TrayApp : Application
         if (_services is null) return;
         var auth = _services.GetRequiredService<IAuthService>();
         await auth.TriggerReauthAsync();
+    }
+
+    private void OnLicenseKeyClicked(object? sender, EventArgs e) => ShowLicenseWindow();
+
+    private void ShowLicenseWindow()
+    {
+        if (_licenseWindow is { IsVisible: true })
+        {
+            _licenseWindow.Activate();
+            return;
+        }
+
+        var proxy = _services?.GetRequiredService<DaemonAuthProxy>();
+        if (proxy is null) return;
+
+        _licenseWindow = new LicenseWindow(proxy);
+        _licenseWindow.Closed += (_, _) =>
+        {
+            _licenseWindow = null;
+            // Refresh status after window closes (may have activated a license)
+            Dispatcher.UIThread.InvokeAsync(UpdateStatusAsync);
+        };
+        _licenseWindow.Show();
     }
 
     private async void OnStopDaemonClicked(object? sender, EventArgs e)

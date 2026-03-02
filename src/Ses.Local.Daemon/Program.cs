@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Ses.Local.Core.Interfaces;
+using Ses.Local.Core.Models;
 using Ses.Local.Core.Services;
 using Ses.Local.Workers;
 using Ses.Local.Workers.Workers;
@@ -55,15 +56,52 @@ internal static class Program
         var startTimestamp = Stopwatch.GetTimestamp();
 
         // IPC endpoints served over Unix domain socket
-        app.MapGet("/api/status", async (IAuthService auth) =>
+        app.MapGet("/api/status", async (IAuthService auth, ILicenseService license) =>
         {
-            var state  = await auth.GetStateAsync();
-            var uptime = Stopwatch.GetElapsedTime(startTimestamp);
+            var state   = await auth.GetStateAsync();
+            var licState = await license.GetStateAsync();
+            var uptime  = Stopwatch.GetElapsedTime(startTimestamp);
             return Results.Ok(new
             {
-                authenticated = state.IsAuthenticated,
-                needsReauth   = state.NeedsReauth,
-                uptime        = uptime.ToString(@"d\.hh\:mm\:ss")
+                authenticated    = state.IsAuthenticated,
+                needsReauth      = state.NeedsReauth,
+                licenseValid     = licState.IsValid,
+                licenseStatus    = licState.Status.ToString(),
+                uptime           = uptime.ToString(@"d\.hh\:mm\:ss")
+            });
+        });
+
+        app.MapGet("/api/license", async (ILicenseService license) =>
+        {
+            var state = await license.GetStateAsync();
+            return Results.Ok(new
+            {
+                status    = state.Status.ToString(),
+                isValid   = state.IsValid,
+                email     = state.Email,
+                expiresAt = state.ExpiresAt,
+            });
+        });
+
+        app.MapPost("/api/license/activate", async (HttpContext ctx, ILicenseService license) =>
+        {
+            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<LicenseActivateRequest>(
+                ctx.Request.Body,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (body is null || string.IsNullOrWhiteSpace(body.LicenseKey))
+                return Results.BadRequest(new { error = "License key is required." });
+
+            var result = await license.ActivateAsync(body.LicenseKey, ctx.RequestAborted);
+
+            if (!result.Succeeded)
+                return Results.BadRequest(new { error = result.ErrorMessage });
+
+            return Results.Ok(new
+            {
+                status    = result.State!.Status.ToString(),
+                email     = result.State.Email,
+                expiresAt = result.State.ExpiresAt,
             });
         });
 
@@ -95,23 +133,61 @@ internal static class Program
         logger.LogInformation("Daemon IPC socket: {SocketPath}", socketPath);
         logger.LogInformation("OAuth/extension listener: http://localhost:37780");
 
-        // Attempt auth silently — never let auth failures kill the process
+        // Startup: require valid license OR OAuth tokens — never let failures kill the daemon
         try
         {
-            var auth = app.Services.GetRequiredService<IAuthService>();
-            var state = await auth.GetStateAsync();
-            if (!state.IsAuthenticated)
+            var auth    = app.Services.GetRequiredService<IAuthService>();
+            var license = app.Services.GetRequiredService<ILicenseService>();
+
+            var authState    = await auth.GetStateAsync();
+            var licenseState = await license.GetStateAsync();
+
+            if (authState.IsAuthenticated)
             {
-                logger.LogInformation("Not authenticated — triggering browser login");
+                logger.LogInformation("OAuth authentication active");
+
+                // Periodic revocation check for license keys (if also have a license)
+                if (licenseState.IsValid && await license.NeedsRevocationCheckAsync())
+                {
+                    logger.LogInformation("Performing license revocation check");
+                    await license.CheckRevocationAsync();
+                }
+            }
+            else if (licenseState.IsValid)
+            {
+                logger.LogInformation("License-only mode — Tier 1 user (license expires {ExpiresAt})", licenseState.ExpiresAt);
+
+                // Periodic revocation check
+                if (await license.NeedsRevocationCheckAsync())
+                {
+                    logger.LogInformation("Performing license revocation check");
+                    var revocationOk = await license.CheckRevocationAsync();
+                    if (!revocationOk)
+                        logger.LogWarning("License revocation check failed — license may have been revoked");
+                }
+            }
+            else if (licenseState.Status == LicenseStatus.NoLicense)
+            {
+                logger.LogInformation("No license and not authenticated — tray app will prompt for license key");
+                await auth.TriggerReauthAsync();
+            }
+            else
+            {
+                logger.LogWarning("License invalid (status: {Status}) and not authenticated — prompting reauth", licenseState.Status);
                 await auth.TriggerReauthAsync();
             }
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Auth check failed on startup — continuing headless");
+            logger.LogWarning(ex, "Startup auth/license check failed — continuing headless");
         }
 
         // Block until SIGTERM/SIGINT
         await app.WaitForShutdownAsync();
     }
+}
+
+internal sealed record LicenseActivateRequest
+{
+    public string LicenseKey { get; init; } = string.Empty;
 }

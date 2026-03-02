@@ -20,4 +20,13 @@ public sealed class SesLocalOptions
 
     /// <summary>Polling interval in seconds for file watchers.</summary>
     public int PollingIntervalSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// RSA public key PEM from the identity server, used for offline license key validation.
+    /// Fetched from the JWKS endpoint on first activation and cached here for offline use.
+    /// </summary>
+    public string? LicensePublicKeyPem { get; set; }
+
+    /// <summary>Days between online revocation checks. Default: 7.</summary>
+    public int LicenseRevocationCheckDays { get; set; } = 7;
 }

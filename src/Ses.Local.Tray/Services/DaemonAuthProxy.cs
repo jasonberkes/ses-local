@@ -46,13 +46,37 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
             return new SesAuthState
             {
                 IsAuthenticated = resp.Authenticated,
-                NeedsReauth     = resp.NeedsReauth
+                NeedsReauth     = resp.NeedsReauth,
+                LicenseValid    = resp.LicenseValid,
+                LicenseStatus   = resp.LicenseStatus,
             };
         }
         catch
         {
             // Daemon not reachable (socket missing or refused)
             return SesAuthState.Unauthenticated;
+        }
+    }
+
+    /// <summary>Activate a license key via the daemon IPC.</summary>
+    public async Task<(bool Succeeded, string? Error)> ActivateLicenseAsync(string licenseKey, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _http.PostAsJsonAsync(
+                "/api/license/activate",
+                new { licenseKey },
+                ct);
+
+            if (response.IsSuccessStatusCode)
+                return (true, null);
+
+            var body = await response.Content.ReadAsStringAsync(ct);
+            return (false, body);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
         }
     }
 
@@ -96,6 +120,8 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
     {
         public bool Authenticated { get; set; }
         public bool NeedsReauth { get; set; }
+        public bool LicenseValid { get; set; }
+        public string LicenseStatus { get; set; } = string.Empty;
         public string Uptime { get; set; } = string.Empty;
     }
 }
