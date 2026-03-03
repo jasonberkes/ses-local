@@ -78,6 +78,17 @@ public interface ILocalDbService
     Task<IReadOnlyList<ConversationObservation>> GetRecentObservationsForSessionsAsync(
         IEnumerable<long> sessionIds, DateTime since, CancellationToken ct = default);
 
+    // ── Privacy Controls (WI-992) ──────────────────────────────────────────
+
+    /// <summary>
+    /// Marks a session as excluded. Excluded sessions are filtered from search, sync, and CLAUDE.md.
+    /// The session stays in the DB so the user can un-exclude later.
+    /// </summary>
+    Task ExcludeSessionAsync(long sessionId, bool excluded, CancellationToken ct = default);
+
+    /// <summary>Returns whether a session is marked as excluded.</summary>
+    Task<bool> IsSessionExcludedAsync(long sessionId, CancellationToken ct = default);
+
     // ── Vector Embeddings (WI-989) ──────────────────────────────────────────
 
     /// <summary>

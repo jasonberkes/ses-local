@@ -8,6 +8,7 @@ using Ses.Local.Core.Models;
 using Ses.Local.Core.Options;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Ses.Local.Core.Services;
 using Ses.Local.Workers.Services;
 using Ses.Local.Workers.Telemetry;
 
@@ -159,6 +160,17 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
     {
         if (!File.Exists(filePath)) return;
 
+        // Project-level exclusion — skip files in excluded project paths
+        foreach (var excluded in _options.ExcludedProjectPaths)
+        {
+            if (!string.IsNullOrEmpty(excluded) &&
+                filePath.Contains(excluded, StringComparison.OrdinalIgnoreCase))
+            {
+                LogProjectExcluded(_logger, filePath);
+                return;
+            }
+        }
+
         // Extract session ID from filename (e.g. abc123.jsonl -> abc123)
         var sessionId = Path.GetFileNameWithoutExtension(filePath);
         if (string.IsNullOrWhiteSpace(sessionId)) return;
@@ -217,7 +229,7 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
                 }
 
                 // Parse legacy flat messages (unchanged — backward compatible)
-                var msg = ParseMessage(node, type);
+                var msg = ParseMessage(node, type, _options.EnablePrivateTagStripping);
                 if (msg is not null)
                 {
                     newMessages.Add(msg);
@@ -230,7 +242,7 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
                 ExtractObservations(
                     node, type, timestamp,
                     newObservations, toolUseClaudeIds, pendingParentRefs,
-                    ref nextSequence);
+                    ref nextSequence, _options.EnablePrivateTagStripping);
             }
             catch (JsonException ex)
             {
@@ -296,7 +308,8 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
         List<ConversationObservation> observations,
         Dictionary<string, int> toolUseClaudeIds,
         Dictionary<int, string> pendingParentRefs,
-        ref int nextSequence)
+        ref int nextSequence,
+        bool stripPrivateTags = false)
     {
         if (type != "user" && type != "assistant") return;
 
@@ -319,13 +332,15 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
                     var filePath    = ExtractFilePath(inputNode);
                     var obsType     = ClassifyToolUse(toolName, inputNode);
                     var claudeId    = block["id"]?.GetValue<string>();
+                    var toolContent = inputJson.Trim();
+                    if (stripPrivateTags) toolContent = PrivateTagStripper.Strip(toolContent);
 
                     var obs = new ConversationObservation
                     {
                         ObservationType = obsType,
                         ToolName        = toolName,
                         FilePath        = filePath,
-                        Content         = inputJson.Trim(),
+                        Content         = toolContent,
                         SequenceNumber  = nextSequence,
                         CreatedAt       = timestamp
                     };
@@ -347,6 +362,7 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
                         ? rawContent.GetValue<string>()
                         : rawContent?.ToJsonString() ?? string.Empty;
                     content = content.Trim();
+                    if (stripPrivateTags) content = PrivateTagStripper.Strip(content);
 
                     var obsType    = ClassifyToolResult(content);
                     var parentRef  = block["tool_use_id"]?.GetValue<string>();
@@ -373,6 +389,7 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
                 {
                     var text = block["text"]?.GetValue<string>() ?? string.Empty;
                     if (string.IsNullOrWhiteSpace(text)) continue;
+                    if (stripPrivateTags) text = PrivateTagStripper.Strip(text);
 
                     observations.Add(new ConversationObservation
                     {
@@ -513,7 +530,7 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
 
     // ── Parsing helpers ───────────────────────────────────────────────────────
 
-    private static ConversationMessage? ParseMessage(JsonNode node, string? type)
+    private static ConversationMessage? ParseMessage(JsonNode node, string? type, bool stripPrivateTags)
     {
         if (type != "user" && type != "assistant") return null;
 
@@ -523,6 +540,9 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
         var content   = ExtractContent(msgNode);
 
         if (string.IsNullOrWhiteSpace(content)) return null;
+
+        if (stripPrivateTags)
+            content = PrivateTagStripper.Strip(content);
 
         int? tokenCount = null;
         var usage = msgNode?["usage"];
@@ -645,4 +665,7 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to save watcher positions")]
     private static partial void LogPositionsSaveFailed(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping excluded project path: {Path}")]
+    private static partial void LogProjectExcluded(ILogger logger, string path);
 }

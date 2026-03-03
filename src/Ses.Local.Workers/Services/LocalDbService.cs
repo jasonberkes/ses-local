@@ -111,9 +111,10 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         var conn = await GetConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash
+            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash, excluded
             FROM conv_sessions
-            WHERE synced_at IS NULL OR updated_at > synced_at
+            WHERE (synced_at IS NULL OR updated_at > synced_at)
+              AND excluded = 0
             ORDER BY updated_at DESC
             LIMIT @batch
             """;
@@ -174,7 +175,9 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             SELECT m.id, m.session_id, m.role, m.content, m.created_at, m.token_count
             FROM conv_messages_fts fts
             JOIN conv_messages m ON m.rowid = fts.rowid
+            JOIN conv_sessions s ON s.id = m.session_id
             WHERE conv_messages_fts MATCH @query
+              AND s.excluded = 0
             ORDER BY rank
             LIMIT @limit
             """;
@@ -274,7 +277,9 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
                    o.token_count, o.sequence_number, o.parent_observation_id, o.created_at
             FROM conv_observations_fts fts
             JOIN conv_observations o ON o.id = fts.rowid
+            JOIN conv_sessions s ON s.id = o.session_id
             WHERE conv_observations_fts MATCH @query
+              AND s.excluded = 0
             ORDER BY rank
             LIMIT @limit
             """;
@@ -295,11 +300,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         var conn = await GetConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash
+            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash, excluded
             FROM conv_sessions
             WHERE source = 'ClaudeCode'
               AND title LIKE @prefix
               AND updated_at >= @since
+              AND excluded = 0
             ORDER BY updated_at DESC
             LIMIT @limit
             """;
@@ -517,6 +523,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         {
             await ApplyMigration7Async(conn, ct);
             await SetUserVersionAsync(conn, 7, ct);
+        }
+
+        if (version < 8)
+        {
+            await ApplyMigration8Async(conn, ct);
+            await SetUserVersionAsync(conn, 8, ct);
         }
     }
 
@@ -797,6 +809,17 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             """, ct);
     }
 
+    private static async Task ApplyMigration8Async(SqliteConnection conn, CancellationToken ct)
+    {
+        // Add excluded column to conv_sessions for privacy controls (WI-992)
+        await ExecuteNonQueryAsync(conn, """
+            ALTER TABLE conv_sessions ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn,
+            "CREATE INDEX IF NOT EXISTS idx_sessions_excluded ON conv_sessions(excluded)", ct);
+    }
+
     // ── Session summary methods ───────────────────────────────────────────────
 
     public async Task UpsertSessionSummaryAsync(SessionSummary summary, CancellationToken ct = default)
@@ -880,7 +903,9 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
                    s.error_count, s.tool_use_count, s.compression_layer, s.created_at
             FROM conv_session_summaries_fts fts
             JOIN conv_session_summaries s ON s.id = fts.rowid
+            JOIN conv_sessions cs ON cs.id = s.session_id
             WHERE conv_session_summaries_fts MATCH @query
+              AND cs.excluded = 0
             ORDER BY rank
             LIMIT @limit
             """;
@@ -915,6 +940,28 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             results.Add(reader.GetInt64(0));
 
         return results;
+    }
+
+    // ── Privacy Controls (WI-992) ────────────────────────────────────────────
+
+    public async Task ExcludeSessionAsync(long sessionId, bool excluded, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "UPDATE conv_sessions SET excluded = @excluded WHERE id = @id";
+        cmd.Parameters.AddWithValue("@excluded", excluded ? 1 : 0);
+        cmd.Parameters.AddWithValue("@id", sessionId);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<bool> IsSessionExcludedAsync(long sessionId, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT excluded FROM conv_sessions WHERE id = @id";
+        cmd.Parameters.AddWithValue("@id", sessionId);
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is long v && v != 0;
     }
 
     // ── Vector Embeddings (WI-989) ────────────────────────────────────────────
@@ -984,7 +1031,7 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         var conn = await GetConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash
+            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash, excluded
             FROM conv_sessions
             WHERE id = @id
             """;
@@ -1004,11 +1051,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         var conn = await GetConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash
+            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash, excluded
             FROM conv_sessions
             WHERE created_at >= @from
               AND created_at <= @to
               AND id != @exclude
+              AND excluded = 0
             ORDER BY created_at DESC
             LIMIT @limit
             """;
@@ -1247,10 +1295,11 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         var conn = await GetConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT s.id, s.source, s.external_id, s.title, s.created_at, s.updated_at, s.synced_at, s.content_hash
+            SELECT s.id, s.source, s.external_id, s.title, s.created_at, s.updated_at, s.synced_at, s.content_hash, s.excluded
             FROM conv_workitem_links wl
             JOIN conv_sessions s ON s.id = wl.session_id
             WHERE wl.workitem_id = @workitem_id
+              AND s.excluded = 0
             ORDER BY wl.confidence DESC, s.created_at DESC
             """;
         cmd.Parameters.AddWithValue("@workitem_id", workItemId);
@@ -1346,7 +1395,8 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         CreatedAt   = DateTime.Parse(r.GetString(4)),
         UpdatedAt   = DateTime.Parse(r.GetString(5)),
         SyncedAt    = r.IsDBNull(6) ? null : DateTime.Parse(r.GetString(6)),
-        ContentHash = r.IsDBNull(7) ? null : r.GetString(7)
+        ContentHash = r.IsDBNull(7) ? null : r.GetString(7),
+        Excluded    = r.FieldCount > 8 && !r.IsDBNull(8) && r.GetInt64(8) != 0
     };
 
     private static ConversationMessage MapMessage(SqliteDataReader r) => new()
