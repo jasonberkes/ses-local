@@ -3,9 +3,12 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Ses.Local.Core.Enums;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
+using Ses.Local.Core.Services;
 
 namespace Ses.Local.Workers.Services;
 
@@ -21,16 +24,18 @@ public sealed class ClaudeExportParser
 {
     private readonly ILocalDbService _db;
     private readonly ILogger<ClaudeExportParser> _logger;
+    private readonly SesLocalOptions _options;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
-    public ClaudeExportParser(ILocalDbService db, ILogger<ClaudeExportParser> logger)
+    public ClaudeExportParser(ILocalDbService db, ILogger<ClaudeExportParser> logger, IOptions<SesLocalOptions> options)
     {
-        _db     = db;
-        _logger = logger;
+        _db      = db;
+        _logger  = logger;
+        _options = options.Value;
     }
 
     /// <summary>
@@ -39,11 +44,13 @@ public sealed class ClaudeExportParser
     /// <param name="filePath">Absolute path to the .json export file.</param>
     /// <param name="progress">Optional progress reporter — called after each conversation is processed.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="importOptions">Optional filtering options for the import.</param>
     /// <returns>Summary of the import operation.</returns>
     public async Task<ImportResult> ImportAsync(
         string filePath,
         IProgress<ImportProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        ImportFilterOptions? importOptions = null)
     {
         if (!File.Exists(filePath))
             throw new FileNotFoundException("Export file not found.", filePath);
@@ -57,9 +64,9 @@ public sealed class ClaudeExportParser
             var format = DetectFormat(filePath);
 
             if (format == ExportFormat.Array)
-                await ImportArrayRootAsync(filePath, result, progress, ct);
+                await ImportArrayRootAsync(filePath, result, progress, ct, importOptions);
             else
-                await ImportObjectRootAsync(filePath, result, progress, ct);
+                await ImportObjectRootAsync(filePath, result, progress, ct, importOptions);
         }
         catch (OperationCanceledException)
         {
@@ -85,7 +92,8 @@ public sealed class ClaudeExportParser
         string filePath,
         ImportResult result,
         IProgress<ImportProgress>? progress,
-        CancellationToken ct)
+        CancellationToken ct,
+        ImportFilterOptions? filter)
     {
         await using var stream = new FileStream(
             filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
@@ -96,6 +104,7 @@ public sealed class ClaudeExportParser
         {
             if (conv is null) continue;
             ct.ThrowIfCancellationRequested();
+            if (ShouldExclude(conv, filter)) { result.Filtered++; continue; }
             await ImportOneAsync(conv, result, ct);
             progress?.Report(new ImportProgress(result.SessionsImported, conv.Name));
         }
@@ -107,7 +116,8 @@ public sealed class ClaudeExportParser
         string filePath,
         ImportResult result,
         IProgress<ImportProgress>? progress,
-        CancellationToken ct)
+        CancellationToken ct,
+        ImportFilterOptions? filter)
     {
         await using var stream = new FileStream(
             filePath, FileMode.Open, FileAccess.Read, FileShare.Read,
@@ -121,6 +131,7 @@ public sealed class ClaudeExportParser
         foreach (var conv in conversations)
         {
             ct.ThrowIfCancellationRequested();
+            if (ShouldExclude(conv, filter)) { result.Filtered++; continue; }
             await ImportOneAsync(conv, result, ct);
             progress?.Report(new ImportProgress(result.SessionsImported, conv.Name));
         }
@@ -181,7 +192,7 @@ public sealed class ClaudeExportParser
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static List<ConversationMessage> BuildMessages(ExportConversation conv, long sessionId)
+    private List<ConversationMessage> BuildMessages(ExportConversation conv, long sessionId)
     {
         var messages = new List<ConversationMessage>(conv.ChatMessages.Count);
 
@@ -189,6 +200,9 @@ public sealed class ClaudeExportParser
         {
             var content = ExtractContent(m);
             if (string.IsNullOrWhiteSpace(content)) continue;
+
+            if (_options.EnablePrivateTagStripping)
+                content = PrivateTagStripper.Strip(content);
 
             messages.Add(new ConversationMessage
             {
@@ -200,6 +214,53 @@ public sealed class ClaudeExportParser
         }
 
         return messages;
+    }
+
+    /// <summary>
+    /// Returns true if the conversation should be excluded from import based on filter options.
+    /// </summary>
+    internal static bool ShouldExclude(ExportConversation conv, ImportFilterOptions? filter)
+    {
+        if (filter is null) return false;
+
+        // Exclude by title pattern (glob-style with * wildcard)
+        if (filter.ExcludeTitlePatterns is { Count: > 0 })
+        {
+            foreach (var pattern in filter.ExcludeTitlePatterns)
+            {
+                if (MatchesGlobPattern(conv.Name, pattern))
+                    return true;
+            }
+        }
+
+        // Exclude by date range
+        if (filter.ExcludeBefore.HasValue)
+        {
+            var createdAt = ParseDate(conv.CreatedAt);
+            if (createdAt < filter.ExcludeBefore.Value)
+                return true;
+        }
+
+        if (filter.ExcludeAfter.HasValue)
+        {
+            var createdAt = ParseDate(conv.CreatedAt);
+            if (createdAt > filter.ExcludeAfter.Value)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>Simple glob pattern matching with * wildcard (case-insensitive).</summary>
+    internal static bool MatchesGlobPattern(string text, string pattern)
+    {
+        if (string.IsNullOrEmpty(pattern)) return false;
+
+        // Convert glob pattern to regex: escape everything except *, then replace * with .*
+        var regexPattern = "^" + System.Text.RegularExpressions.Regex.Escape(pattern)
+            .Replace("\\*", ".*") + "$";
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            text, regexPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
     /// <summary>
@@ -279,6 +340,25 @@ public sealed class ImportResult
 
     /// <summary>Conversations that could not be parsed or stored.</summary>
     public int Errors { get; set; }
+
+    /// <summary>Conversations excluded by import filter options.</summary>
+    public int Filtered { get; set; }
+}
+
+/// <summary>Filtering options for import operations.</summary>
+public sealed class ImportFilterOptions
+{
+    /// <summary>
+    /// Exclude conversations whose title matches any of these glob patterns (case-insensitive, * wildcard).
+    /// Example: "personal*" excludes all conversations starting with "personal".
+    /// </summary>
+    public IReadOnlyList<string>? ExcludeTitlePatterns { get; init; }
+
+    /// <summary>Exclude conversations created before this date.</summary>
+    public DateTime? ExcludeBefore { get; init; }
+
+    /// <summary>Exclude conversations created after this date.</summary>
+    public DateTime? ExcludeAfter { get; init; }
 }
 
 // ── Internal DTOs (mirroring Claude.ai export JSON structure) ─────────────────

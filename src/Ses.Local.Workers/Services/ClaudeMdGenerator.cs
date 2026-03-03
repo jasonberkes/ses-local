@@ -43,13 +43,23 @@ public sealed class ClaudeMdGenerator : IClaudeMdGenerator
         if (string.IsNullOrWhiteSpace(projectPath)) return;
         if (!Directory.Exists(projectPath)) return;
 
-        // Check exclusions
+        // Check exclusions (both CLAUDE.md-specific and privacy-level project exclusions)
         foreach (var excluded in _options.ClaudeMdExcludePaths)
         {
             if (!string.IsNullOrEmpty(excluded) &&
                 projectPath.Contains(excluded, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogDebug("Skipping CLAUDE.md generation for excluded path: {Path}", projectPath);
+                return;
+            }
+        }
+
+        foreach (var excluded in _options.ExcludedProjectPaths)
+        {
+            if (!string.IsNullOrEmpty(excluded) &&
+                projectPath.Contains(excluded, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug("Skipping CLAUDE.md generation for privacy-excluded project: {Path}", projectPath);
                 return;
             }
         }

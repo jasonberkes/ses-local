@@ -63,6 +63,21 @@ public sealed class SesLocalOptions
     /// <summary>Project paths to exclude from CLAUDE.md generation (substring match).</summary>
     public IReadOnlyList<string> ClaudeMdExcludePaths { get; set; } = [];
 
+    // ── Privacy Controls (WI-992) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Enable stripping of &lt;private&gt;...&lt;/private&gt; tags from message content before storage.
+    /// When enabled, private-tagged content is replaced with "[PRIVATE — redacted]".
+    /// </summary>
+    public bool EnablePrivateTagStripping { get; set; } = true;
+
+    /// <summary>
+    /// Project paths to completely exclude from conversation capture.
+    /// ClaudeCodeWatcher skips JSONL files in these directories.
+    /// ClaudeMdGenerator also skips these paths.
+    /// </summary>
+    public IReadOnlyList<string> ExcludedProjectPaths { get; set; } = [];
+
     // ── Vector Search (WI-989) ────────────────────────────────────────────────
 
     /// <summary>

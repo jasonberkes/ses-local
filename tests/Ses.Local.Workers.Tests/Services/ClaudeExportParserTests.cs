@@ -1,9 +1,11 @@
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Ses.Local.Core.Enums;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
+using Ses.Local.Core.Options;
 using Ses.Local.Workers.Services;
 using Xunit;
 
@@ -16,6 +18,9 @@ namespace Ses.Local.Workers.Tests.Services;
 /// </summary>
 public sealed class ClaudeExportParserTests : IAsyncDisposable
 {
+    private static IOptions<SesLocalOptions> DefaultOptions =>
+        Options.Create(new SesLocalOptions());
+
     // ── Shared sample JSON ────────────────────────────────────────────────────
 
     private const string SampleArrayExport = """
@@ -169,7 +174,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     public async Task ImportAsync_ArrayRoot_ImportsAllConversations()
     {
         var (db, sessions, messages) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync(SampleArrayExport);
         try
@@ -190,7 +195,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     public async Task ImportAsync_ArrayRoot_SetsCorrectSource()
     {
         var (db, sessions, _) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync(SampleArrayExport);
         try
@@ -206,7 +211,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     public async Task ImportAsync_ArrayRoot_SetsCorrectTitle()
     {
         var (db, sessions, _) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync(SampleArrayExport);
         try
@@ -223,7 +228,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     public async Task ImportAsync_ArrayRoot_StoresMessages()
     {
         var (db, _, messages) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync(SampleArrayExport);
         try
@@ -246,7 +251,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     public async Task ImportAsync_ArrayRoot_MapsRolesCorrectly()
     {
         var (db, _, messages) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync(SampleArrayExport);
         try
@@ -266,7 +271,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     public async Task ImportAsync_ObjectRoot_ImportsConversations()
     {
         var (db, sessions, messages) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync(SampleObjectExport);
         try
@@ -292,7 +297,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     {
         // conv-002 assistant has text="" but content=[{type:"text", text:"..."}]
         var (db, _, messages) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync(SampleArrayExport);
         try
@@ -470,7 +475,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     public async Task ImportAsync_FileNotFound_ThrowsFileNotFoundException()
     {
         var db = new Mock<ILocalDbService>();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         await Assert.ThrowsAsync<FileNotFoundException>(() =>
             parser.ImportAsync("/nonexistent/path/export.json"));
@@ -480,7 +485,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     public async Task ImportAsync_InvalidJson_ReturnsErrorCount()
     {
         var db = new Mock<ILocalDbService>();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync("{ this is not valid json }}}}");
         try
@@ -499,7 +504,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
         db.Setup(x => x.UpsertSessionAsync(It.IsAny<ConversationSession>(), It.IsAny<CancellationToken>()))
           .Returns(Task.CompletedTask);
 
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync("[]");
         try
@@ -529,7 +534,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
             """;
 
         var db = new Mock<ILocalDbService>();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync(json);
         try
@@ -548,7 +553,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     public async Task ImportAsync_ReportsProgress_ForEachConversation()
     {
         var (db, _, _) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var reports = new List<ImportProgress>();
         var progress = new Progress<ImportProgress>(p => reports.Add(p));
@@ -576,7 +581,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
         const int count = 100;
 
         var (db, sessions, _) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteLargeBatchFileAsync(count);
         try
@@ -608,7 +613,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
         db.Setup(x => x.UpsertMessagesAsync(It.IsAny<IEnumerable<ConversationMessage>>(), It.IsAny<CancellationToken>()))
           .Returns(Task.CompletedTask);
 
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteLargeBatchFileAsync(50);
         try
@@ -625,7 +630,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
     public async Task ImportAsync_ParsesDates_AsUtc()
     {
         var (db, sessions, _) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync(SampleArrayExport);
         try
@@ -659,7 +664,7 @@ public sealed class ClaudeExportParserTests : IAsyncDisposable
             """;
 
         var (db, sessions, _) = CreateCapturingMock();
-        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance);
+        var parser = new ClaudeExportParser(db.Object, NullLogger<ClaudeExportParser>.Instance, DefaultOptions);
 
         var path = await WriteExportFileAsync(json);
         try
