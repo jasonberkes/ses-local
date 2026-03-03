@@ -20,7 +20,7 @@ namespace Ses.Local.Workers.Services;
 /// Deduplication is handled via ExternalId (uuid) — existing conversations with
 /// identical UUIDs are updated rather than duplicated.
 /// </summary>
-public sealed class ClaudeExportParser
+public sealed class ClaudeExportParser : IConversationImporter
 {
     private readonly ILocalDbService _db;
     private readonly ILogger<ClaudeExportParser> _logger;

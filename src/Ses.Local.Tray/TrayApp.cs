@@ -201,13 +201,21 @@ public partial class TrayApp : Application
             var files = await topLevel.StorageProvider.OpenFilePickerAsync(
                 new Avalonia.Platform.Storage.FilePickerOpenOptions
                 {
-                    Title         = "Select Claude Export JSON",
+                    Title         = "Select AI Conversation Export",
                     AllowMultiple = false,
                     FileTypeFilter =
                     [
+                        new Avalonia.Platform.Storage.FilePickerFileType("Conversation export files")
+                        {
+                            Patterns = ["*.json", "*.zip"]
+                        },
                         new Avalonia.Platform.Storage.FilePickerFileType("JSON files")
                         {
                             Patterns = ["*.json"]
+                        },
+                        new Avalonia.Platform.Storage.FilePickerFileType("ZIP archives")
+                        {
+                            Patterns = ["*.zip"]
                         }
                     ]
                 });
@@ -218,8 +226,9 @@ public partial class TrayApp : Application
 
         if (filePath is null) return;
 
-        // Update menu item to show progress
-        _importItem.Header   = "Importing...";
+        // Show format-aware progress label
+        var formatLabel = GuessFormatLabel(filePath);
+        _importItem.Header    = $"Importing {formatLabel} conversations...";
         _importItem.IsEnabled = false;
 
         try
@@ -316,6 +325,32 @@ public partial class TrayApp : Application
         {
             _mainWindow.Activate();
         }
+    }
+
+    /// <summary>
+    /// Returns a human-readable format label based on a quick peek at the file name/extension.
+    /// Used for the "Importing {format} conversations..." progress label only — the daemon
+    /// performs authoritative content-based detection.
+    /// </summary>
+    private static string GuessFormatLabel(string filePath)
+    {
+        var ext = Path.GetExtension(filePath).ToLowerInvariant();
+        if (ext == ".zip")
+        {
+            try
+            {
+                using var zip = System.IO.Compression.ZipFile.OpenRead(filePath);
+                if (zip.Entries.Any(e =>
+                        string.Equals(e.Name, "conversations.json", StringComparison.OrdinalIgnoreCase)))
+                    return "ChatGPT";
+                if (zip.Entries.Any(e =>
+                        string.Equals(e.Name, "My Activity.json", StringComparison.OrdinalIgnoreCase)))
+                    return "Gemini";
+            }
+            catch { /* ignore — daemon will report real format */ }
+            return "AI";
+        }
+        return "Claude";
     }
 
     private static WindowIcon? TryGetTrayIcon()

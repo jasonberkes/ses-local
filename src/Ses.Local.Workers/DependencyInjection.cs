@@ -160,8 +160,11 @@ public static class DependencyInjection
         // CLAUDE.md auto-generation (WI-982)
         services.AddSingleton<IClaudeMdGenerator, ClaudeMdGenerator>();
 
-        // Claude.ai export importer (WI-985)
+        // Conversation export importers (WI-985, WI-997)
         services.AddSingleton<ClaudeExportParser>();
+        services.AddSingleton<ChatGptExportParser>();
+        services.AddSingleton<GeminiExportParser>();
+        services.AddSingleton<ConversationImportDispatcher>();
 
         // Vector search — ONNX embedding + brute-force cosine similarity (WI-989)
         // Model download client — 3 retries, 5 min total timeout (large binary download)

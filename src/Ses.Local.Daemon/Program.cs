@@ -125,7 +125,7 @@ internal static class Program
             });
         });
 
-        app.MapPost("/api/conversations/import", async (HttpContext ctx, ClaudeExportParser parser) =>
+        app.MapPost("/api/conversations/import", async (HttpContext ctx, ConversationImportDispatcher dispatcher) =>
         {
             var body = await System.Text.Json.JsonSerializer.DeserializeAsync<ImportConversationsRequest>(
                 ctx.Request.Body,
@@ -137,14 +137,16 @@ internal static class Program
             if (!File.Exists(body.FilePath))
                 return Results.BadRequest(new { error = "File not found." });
 
-            var result = await parser.ImportAsync(body.FilePath, ct: ctx.RequestAborted);
+            var detectedFormat = ConversationImportDispatcher.DetectFormat(body.FilePath);
+            var result = await dispatcher.ImportAsync(body.FilePath, ct: ctx.RequestAborted);
 
             return Results.Ok(new
             {
                 sessionsImported = result.SessionsImported,
                 messagesImported = result.MessagesImported,
                 duplicates       = result.Duplicates,
-                errors           = result.Errors
+                errors           = result.Errors,
+                format           = ConversationImportDispatcher.FormatLabel(detectedFormat)
             });
         });
 
