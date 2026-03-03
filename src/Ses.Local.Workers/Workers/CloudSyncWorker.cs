@@ -74,6 +74,14 @@ public sealed partial class CloudSyncWorker : BackgroundService
             return 0;
         }
 
+        // Resolve or generate device_id for this machine (used to filter own uploads on pull)
+        var deviceId = await _db.GetSyncMetadataAsync("device_id", ct);
+        if (deviceId is null)
+        {
+            deviceId = Guid.NewGuid().ToString();
+            await _db.SetSyncMetadataAsync("device_id", deviceId, ct);
+        }
+
         var pending = await _db.GetPendingSyncAsync(BatchSize, ct);
         if (pending.Count == 0) return 0;
 
@@ -91,8 +99,8 @@ public sealed partial class CloudSyncWorker : BackgroundService
 
                 SesLocalMetrics.UploadsAttempted.Add(1);
 
-                // Upload to DocumentService
-                var docId = await _docUploader.UploadAsync(session, messages, pat, ct);
+                // Upload to DocumentService (include deviceId so pull workers skip own uploads)
+                var docId = await _docUploader.UploadAsync(session, messages, pat, deviceId, ct);
 
                 // Retain to cloud memory (best-effort, don't fail sync on memory error)
                 _ = await _memRetainer.RetainAsync(session, messages, pat, ct);

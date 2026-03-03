@@ -66,6 +66,7 @@ internal static class Program
         builder.Services.AddHostedService<ClaudeCodeWatcher>();
         builder.Services.AddHostedService<CoworkWatcher>();
         builder.Services.AddHostedService<CloudSyncWorker>();
+        builder.Services.AddHostedService<CloudPullWorker>();
         builder.Services.AddHostedService<BrowserExtensionListener>();
         builder.Services.AddHostedService<AutoUpdateWorker>();
         builder.Services.AddHostedService<SesMcpManagerWorker>();

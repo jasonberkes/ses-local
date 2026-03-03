@@ -101,6 +101,7 @@ public static class DependencyInjection
 
         // Cloud sync services
         services.AddSingleton<DocumentServiceUploader>();
+        services.AddSingleton<IDocumentServiceDownloader, DocumentServiceDownloader>();
         services.AddSingleton<CloudMemoryRetainer>();
 
         // Desktop activity event bus + LevelDB watcher (WI-940)

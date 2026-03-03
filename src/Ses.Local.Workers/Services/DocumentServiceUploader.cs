@@ -36,10 +36,16 @@ public sealed class DocumentServiceUploader
     /// <summary>
     /// Uploads a conversation transcript. Returns the document ID, or null on failure.
     /// </summary>
+    /// <param name="session">The session to upload.</param>
+    /// <param name="messages">Messages belonging to the session.</param>
+    /// <param name="pat">Bearer token for DocumentService auth.</param>
+    /// <param name="deviceId">Optional device UUID — embedded in metadata so pull workers can skip own uploads.</param>
+    /// <param name="ct">Cancellation token.</param>
     public async Task<string?> UploadAsync(
         ConversationSession session,
         IReadOnlyList<ConversationMessage> messages,
         string pat,
+        string? deviceId = null,
         CancellationToken ct = default)
     {
         try
@@ -54,6 +60,7 @@ public sealed class DocumentServiceUploader
                 source       = session.Source.ToString(),
                 externalId   = session.ExternalId,
                 messageCount = messages.Count,
+                deviceId,
                 transcript
             });
 
