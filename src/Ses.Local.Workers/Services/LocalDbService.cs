@@ -506,6 +506,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             await ApplyMigration5Async(conn, ct);
             await SetUserVersionAsync(conn, 5, ct);
         }
+
+        if (version < 6)
+        {
+            await ApplyMigration6Async(conn, ct);
+            await SetUserVersionAsync(conn, 6, ct);
+        }
     }
 
     private static async Task ApplyMigration1Async(SqliteConnection conn, CancellationToken ct)
@@ -635,6 +641,26 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
                 created_at TEXT NOT NULL
             )
             """, ct);
+    }
+
+    private static async Task ApplyMigration6Async(SqliteConnection conn, CancellationToken ct)
+    {
+        // conv_relationships — heuristic cross-session links (WI-986)
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE IF NOT EXISTS conv_relationships (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id_a      INTEGER NOT NULL REFERENCES conv_sessions(id),
+                session_id_b      INTEGER NOT NULL REFERENCES conv_sessions(id),
+                relationship_type TEXT NOT NULL,
+                confidence        REAL NOT NULL DEFAULT 0.5,
+                evidence          TEXT NULL,
+                created_at        TEXT NOT NULL,
+                UNIQUE(session_id_a, session_id_b, relationship_type)
+            )
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_conv_rel_a ON conv_relationships(session_id_a)", ct);
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_conv_rel_b ON conv_relationships(session_id_b)", ct);
     }
 
     private static async Task ApplyMigration2Async(SqliteConnection conn, CancellationToken ct)
@@ -925,6 +951,196 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
 
         return results;
     }
+
+    // ── Conversation Relationships (WI-986) ──────────────────────────────────
+
+    public async Task<ConversationSession?> GetSessionByIdAsync(long sessionId, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash
+            FROM conv_sessions
+            WHERE id = @id
+            """;
+        cmd.Parameters.AddWithValue("@id", sessionId);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (await reader.ReadAsync(ct))
+            return MapSession(reader);
+
+        return null;
+    }
+
+    public async Task<IReadOnlyList<ConversationSession>> GetSessionsInTimeWindowAsync(
+        DateTime from, DateTime to, long excludeSessionId,
+        int limit = 200, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash
+            FROM conv_sessions
+            WHERE created_at >= @from
+              AND created_at <= @to
+              AND id != @exclude
+            ORDER BY created_at DESC
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@from",    from.ToString("O"));
+        cmd.Parameters.AddWithValue("@to",      to.ToString("O"));
+        cmd.Parameters.AddWithValue("@exclude", excludeSessionId);
+        cmd.Parameters.AddWithValue("@limit",   limit);
+
+        var results = new List<ConversationSession>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapSession(reader));
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<(long SessionId, int SharedCount)>> GetSessionsWithSharedFilesAsync(
+        IEnumerable<string> filePaths, long excludeSessionId, DateTime since,
+        CancellationToken ct = default)
+    {
+        var fileList = filePaths.ToList();
+        if (fileList.Count == 0) return [];
+
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+
+        // Build parameterized IN clause (strings must be parameterized, not interpolated)
+        var placeholders = string.Join(", ", fileList.Select((_, i) => $"@fp{i}"));
+        cmd.CommandText = $"""
+            SELECT o.session_id, COUNT(DISTINCT o.file_path) AS shared_count
+            FROM conv_observations o
+            WHERE o.file_path IN ({placeholders})
+              AND o.session_id != @exclude
+              AND o.created_at >= @since
+            GROUP BY o.session_id
+            """;
+
+        for (int i = 0; i < fileList.Count; i++)
+            cmd.Parameters.AddWithValue($"@fp{i}", fileList[i]);
+        cmd.Parameters.AddWithValue("@exclude", excludeSessionId);
+        cmd.Parameters.AddWithValue("@since",   since.ToString("O"));
+
+        var results = new List<(long, int)>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add((reader.GetInt64(0), (int)reader.GetInt64(1)));
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<SessionSummary>> GetBulkSessionSummariesAsync(
+        IEnumerable<long> sessionIds, CancellationToken ct = default)
+    {
+        var ids = string.Join(",", sessionIds);
+        if (string.IsNullOrEmpty(ids)) return [];
+
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"""
+            SELECT id, session_id, category, narrative, concepts, file_references, git_commit_messages,
+                   tests_run, tests_passed, tests_failed, error_count, tool_use_count, compression_layer, created_at
+            FROM conv_session_summaries
+            WHERE session_id IN ({ids})
+            """;
+
+        var results = new List<SessionSummary>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapSummary(reader));
+
+        return results;
+    }
+
+    public async Task CreateConversationLinksAsync(
+        IEnumerable<ConversationRelationship> links, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var tx = conn.BeginTransaction();
+        try
+        {
+            foreach (var link in links)
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = """
+                    INSERT INTO conv_relationships
+                        (session_id_a, session_id_b, relationship_type, confidence, evidence, created_at)
+                    VALUES
+                        (@a, @b, @type, @confidence, @evidence, @created_at)
+                    ON CONFLICT(session_id_a, session_id_b, relationship_type) DO UPDATE SET
+                        confidence = MAX(confidence, excluded.confidence),
+                        evidence   = excluded.evidence
+                    """;
+                cmd.Parameters.AddWithValue("@a",          link.SessionIdA);
+                cmd.Parameters.AddWithValue("@b",          link.SessionIdB);
+                cmd.Parameters.AddWithValue("@type",       link.RelationshipType);
+                cmd.Parameters.AddWithValue("@confidence", link.Confidence);
+                cmd.Parameters.AddWithValue("@evidence",   link.Evidence ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("@created_at", link.CreatedAt.ToString("O"));
+                await cmd.ExecuteNonQueryAsync(ct);
+
+                // Sync back DB-assigned Id
+                if (link.Id == 0)
+                {
+                    await using var idCmd = conn.CreateCommand();
+                    idCmd.Transaction = tx;
+                    idCmd.CommandText = """
+                        SELECT id FROM conv_relationships
+                        WHERE session_id_a = @a AND session_id_b = @b AND relationship_type = @type
+                        """;
+                    idCmd.Parameters.AddWithValue("@a",    link.SessionIdA);
+                    idCmd.Parameters.AddWithValue("@b",    link.SessionIdB);
+                    idCmd.Parameters.AddWithValue("@type", link.RelationshipType);
+                    var result = await idCmd.ExecuteScalarAsync(ct);
+                    if (result is long id) link.Id = id;
+                }
+            }
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    public async Task<IReadOnlyList<ConversationRelationship>> GetRelatedSessionsAsync(
+        long sessionId, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, session_id_a, session_id_b, relationship_type, confidence, evidence, created_at
+            FROM conv_relationships
+            WHERE session_id_a = @session_id OR session_id_b = @session_id
+            ORDER BY confidence DESC
+            """;
+        cmd.Parameters.AddWithValue("@session_id", sessionId);
+
+        var results = new List<ConversationRelationship>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapRelationship(reader));
+
+        return results;
+    }
+
+    private static ConversationRelationship MapRelationship(SqliteDataReader r) => new()
+    {
+        Id               = r.GetInt64(0),
+        SessionIdA       = r.GetInt64(1),
+        SessionIdB       = r.GetInt64(2),
+        RelationshipType = r.GetString(3),
+        Confidence       = r.GetDouble(4),
+        Evidence         = r.IsDBNull(5) ? null : r.GetString(5),
+        CreatedAt        = DateTime.Parse(r.GetString(6))
+    };
 
     private static byte[] FloatArrayToBlob(float[] vector)
     {

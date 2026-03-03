@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Options;
+using Ses.Local.Workers.Services;
 using Ses.Local.Workers.Telemetry;
 
 namespace Ses.Local.Workers.Workers;
@@ -12,6 +13,7 @@ namespace Ses.Local.Workers.Workers;
 /// Background worker that polls for sessions with uncompressed observations and
 /// runs the Layer 1 rule-based compressor to produce <c>conv_session_summaries</c> rows.
 /// When vector search is enabled, also embeds new summaries for semantic search.
+/// After compression, runs <see cref="ConversationLinker"/> to detect cross-surface relationships.
 /// Polls every 60 seconds and processes up to 10 sessions per pass.
 /// </summary>
 public sealed partial class CompressionWorker : BackgroundService
@@ -21,6 +23,7 @@ public sealed partial class CompressionWorker : BackgroundService
 
     private readonly ILocalDbService _db;
     private readonly IObservationCompressor _compressor;
+    private readonly ConversationLinker _linker;
     private readonly IVectorSearchService? _vectorSearch;
     private readonly bool _vectorSearchEnabled;
     private readonly ILogger<CompressionWorker> _logger;
@@ -28,15 +31,17 @@ public sealed partial class CompressionWorker : BackgroundService
     public CompressionWorker(
         ILocalDbService db,
         IObservationCompressor compressor,
+        ConversationLinker linker,
         IOptions<SesLocalOptions> options,
         ILogger<CompressionWorker> logger,
         IVectorSearchService? vectorSearch = null)
     {
-        _db         = db;
-        _compressor = compressor;
-        _vectorSearch = vectorSearch;
+        _db                  = db;
+        _compressor          = compressor;
+        _linker              = linker;
+        _vectorSearch        = vectorSearch;
         _vectorSearchEnabled = options.Value.EnableVectorSearch;
-        _logger     = logger;
+        _logger              = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -115,6 +120,16 @@ public sealed partial class CompressionWorker : BackgroundService
                     }
                 }
 
+                // Detect and persist cross-surface conversation relationships
+                try
+                {
+                    await _linker.ProcessSessionAsync(sessionId, ct);
+                }
+                catch (Exception linkEx) when (linkEx is not OperationCanceledException)
+                {
+                    LogLinkingFailed(_logger, sessionId, linkEx);
+                }
+
                 LogSessionCompressed(_logger, sessionId, summary.CompressionLayer, summary.Category,
                     summary.ToolUseCount, summary.ErrorCount);
             }
@@ -186,4 +201,7 @@ public sealed partial class CompressionWorker : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to embed session {SessionId} for vector search")]
     private static partial void LogEmbeddingFailed(ILogger logger, long sessionId, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Failed to link session {SessionId} to related conversations")]
+    private static partial void LogLinkingFailed(ILogger logger, long sessionId, Exception ex);
 }
