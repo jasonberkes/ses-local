@@ -148,6 +148,10 @@ public static class DependencyInjection
 
         // Observation compression pipeline — Layer 1 (rule-based, always runs)
         services.AddSingleton<IObservationCompressor, RuleBasedCompressor>();
+
+        // Cross-session conversation linker (WI-986) — run after each compression
+        services.AddSingleton<ConversationLinker>();
+
         services.AddHostedService<CompressionWorker>();
 
         // CLAUDE.md auto-generation (WI-982)

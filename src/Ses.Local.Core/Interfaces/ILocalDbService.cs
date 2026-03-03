@@ -94,4 +94,47 @@ public interface ILocalDbService
 
     /// <summary>Returns session IDs that have summaries but no embedding yet.</summary>
     Task<IReadOnlyList<long>> GetSessionsWithoutEmbeddingAsync(int batchSize = 10, CancellationToken ct = default);
+
+    // ── Conversation Relationships (WI-986) ──────────────────────────────────
+
+    /// <summary>Returns a session by its primary key, or null if not found.</summary>
+    Task<ConversationSession?> GetSessionByIdAsync(long sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns sessions created within the given time range, excluding the specified session.
+    /// Ordered by created_at descending. Used by ConversationLinker to find linking candidates.
+    /// </summary>
+    Task<IReadOnlyList<ConversationSession>> GetSessionsInTimeWindowAsync(
+        DateTime from, DateTime to, long excludeSessionId,
+        int limit = 200, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns sessions that have observations touching any of the given file paths,
+    /// along with the count of matching distinct file paths per session.
+    /// Excludes the specified session. Scoped to sessions created after <paramref name="since"/>.
+    /// </summary>
+    Task<IReadOnlyList<(long SessionId, int SharedCount)>> GetSessionsWithSharedFilesAsync(
+        IEnumerable<string> filePaths, long excludeSessionId, DateTime since,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns summaries for all provided session IDs in a single query.
+    /// Used by ConversationLinker for bulk concept-overlap analysis.
+    /// </summary>
+    Task<IReadOnlyList<SessionSummary>> GetBulkSessionSummariesAsync(
+        IEnumerable<long> sessionIds, CancellationToken ct = default);
+
+    /// <summary>
+    /// Inserts or updates cross-session relationship links.
+    /// On conflict (session_id_a, session_id_b, relationship_type), keeps the higher confidence value.
+    /// Syncs back the DB-assigned Id on each inserted item.
+    /// </summary>
+    Task CreateConversationLinksAsync(IEnumerable<ConversationRelationship> links, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns all relationship links involving the given session (as either side),
+    /// ordered by confidence descending.
+    /// </summary>
+    Task<IReadOnlyList<ConversationRelationship>> GetRelatedSessionsAsync(
+        long sessionId, CancellationToken ct = default);
 }
