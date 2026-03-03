@@ -165,4 +165,26 @@ public interface ILocalDbService
     /// Returns all sessions linked to a given WorkItem ID, ordered by confidence descending.
     /// </summary>
     Task<IReadOnlyList<ConversationSession>> GetSessionsForWorkItemAsync(int workItemId, CancellationToken ct = default);
+
+    // ── Cloud Pull (WI-991) ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns a session by its (source, externalId) natural key, or null if not found.
+    /// Used by CloudPullWorker for content-hash deduplication before merging cloud documents.
+    /// </summary>
+    Task<ConversationSession?> GetSessionBySourceAndExternalIdAsync(
+        string source, string externalId, CancellationToken ct = default);
+
+    // ── Sync Metadata (WI-991) ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns the value for a sync_metadata key, or null if not found.
+    /// Used to store last_pull_at, device_id, and other sync state.
+    /// </summary>
+    Task<string?> GetSyncMetadataAsync(string key, CancellationToken ct = default);
+
+    /// <summary>
+    /// Inserts or replaces a sync_metadata key/value pair.
+    /// </summary>
+    Task SetSyncMetadataAsync(string key, string value, CancellationToken ct = default);
 }

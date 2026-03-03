@@ -57,6 +57,24 @@ public static class SesLocalMetrics
             "ses.sync.uploads_failed",
             description: "Number of cloud sync uploads that failed");
 
+    /// <summary>Number of cloud pull downloads attempted.</summary>
+    public static readonly Counter<long> PullsAttempted =
+        _meter.CreateCounter<long>(
+            "ses.sync.pulls_attempted",
+            description: "Number of cloud pull downloads attempted");
+
+    /// <summary>Number of cloud pull downloads that resulted in a new or updated local session.</summary>
+    public static readonly Counter<long> PullsImported =
+        _meter.CreateCounter<long>(
+            "ses.sync.pulls_imported",
+            description: "Number of sessions imported from cloud pull");
+
+    /// <summary>Number of cloud pull documents skipped (already local, own device, or parse failure).</summary>
+    public static readonly Counter<long> PullsSkipped =
+        _meter.CreateCounter<long>(
+            "ses.sync.pulls_skipped",
+            description: "Number of pull documents skipped (deduplication or parse failure)");
+
     // ── Compression metrics ───────────────────────────────────────────────────
 
     /// <summary>

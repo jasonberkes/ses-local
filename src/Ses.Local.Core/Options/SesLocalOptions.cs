@@ -78,6 +78,21 @@ public sealed class SesLocalOptions
     /// </summary>
     public IReadOnlyList<string> ExcludedProjectPaths { get; set; } = [];
 
+    // ── Cloud Pull Sync (WI-991) ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Enable cloud-to-local pull sync for multi-device support (Tier 2, requires OAuth).
+    /// When enabled, CloudPullWorker downloads conversations captured on other devices.
+    /// Default: false.
+    /// </summary>
+    public bool EnableCloudPull { get; set; } = false;
+
+    /// <summary>
+    /// Interval in minutes between cloud pull sync passes.
+    /// Default: 10.
+    /// </summary>
+    public int CloudPullIntervalMinutes { get; set; } = 10;
+
     // ── Vector Search (WI-989) ────────────────────────────────────────────────
 
     /// <summary>

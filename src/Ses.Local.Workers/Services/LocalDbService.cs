@@ -530,6 +530,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             await ApplyMigration8Async(conn, ct);
             await SetUserVersionAsync(conn, 8, ct);
         }
+
+        if (version < 9)
+        {
+            await ApplyMigration9Async(conn, ct);
+            await SetUserVersionAsync(conn, 9, ct);
+        }
     }
 
     private static async Task ApplyMigration1Async(SqliteConnection conn, CancellationToken ct)
@@ -820,6 +826,18 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             "CREATE INDEX IF NOT EXISTS idx_sessions_excluded ON conv_sessions(excluded)", ct);
     }
 
+    private static async Task ApplyMigration9Async(SqliteConnection conn, CancellationToken ct)
+    {
+        // sync_metadata — key/value store for pull sync state: last_pull_at, device_id (WI-991)
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE IF NOT EXISTS sync_metadata (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """, ct);
+    }
+
     // ── Session summary methods ───────────────────────────────────────────────
 
     public async Task UpsertSessionSummaryAsync(SessionSummary summary, CancellationToken ct = default)
@@ -1036,6 +1054,26 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             WHERE id = @id
             """;
         cmd.Parameters.AddWithValue("@id", sessionId);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (await reader.ReadAsync(ct))
+            return MapSession(reader);
+
+        return null;
+    }
+
+    public async Task<ConversationSession?> GetSessionBySourceAndExternalIdAsync(
+        string source, string externalId, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, source, external_id, title, created_at, updated_at, synced_at, content_hash, excluded
+            FROM conv_sessions
+            WHERE source = @source AND external_id = @external_id
+            """;
+        cmd.Parameters.AddWithValue("@source", source);
+        cmd.Parameters.AddWithValue("@external_id", externalId);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         if (await reader.ReadAsync(ct))
@@ -1450,6 +1488,35 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         Confidence           = r.GetDouble(4),
         CreatedAt            = DateTime.Parse(r.GetString(5))
     };
+
+    // ── Sync Metadata (WI-991) ───────────────────────────────────────────────
+
+    public async Task<string?> GetSyncMetadataAsync(string key, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT value FROM sync_metadata WHERE key = @key";
+        cmd.Parameters.AddWithValue("@key", key);
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is string s ? s : null;
+    }
+
+    public async Task SetSyncMetadataAsync(string key, string value, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO sync_metadata (key, value, updated_at)
+            VALUES (@key, @value, @updated_at)
+            ON CONFLICT(key) DO UPDATE SET
+                value      = excluded.value,
+                updated_at = excluded.updated_at
+            """;
+        cmd.Parameters.AddWithValue("@key", key);
+        cmd.Parameters.AddWithValue("@value", value);
+        cmd.Parameters.AddWithValue("@updated_at", DateTime.UtcNow.ToString("O"));
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 
     public async ValueTask DisposeAsync()
     {
