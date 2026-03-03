@@ -512,6 +512,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             await ApplyMigration6Async(conn, ct);
             await SetUserVersionAsync(conn, 6, ct);
         }
+
+        if (version < 7)
+        {
+            await ApplyMigration7Async(conn, ct);
+            await SetUserVersionAsync(conn, 7, ct);
+        }
     }
 
     private static async Task ApplyMigration1Async(SqliteConnection conn, CancellationToken ct)
@@ -661,6 +667,25 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
 
         await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_conv_rel_a ON conv_relationships(session_id_a)", ct);
         await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_conv_rel_b ON conv_relationships(session_id_b)", ct);
+    }
+
+    private static async Task ApplyMigration7Async(SqliteConnection conn, CancellationToken ct)
+    {
+        // conv_workitem_links — session → TaskMaster WorkItem references (WI-987)
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE IF NOT EXISTS conv_workitem_links (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id  INTEGER NOT NULL REFERENCES conv_sessions(id) ON DELETE CASCADE,
+                workitem_id INTEGER NOT NULL,
+                link_source TEXT NOT NULL,
+                confidence  REAL NOT NULL DEFAULT 1.0,
+                created_at  TEXT NOT NULL,
+                UNIQUE(session_id, workitem_id)
+            )
+            """, ct);
+
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_wi_links_session ON conv_workitem_links(session_id)", ct);
+        await ExecuteNonQueryAsync(conn, "CREATE INDEX IF NOT EXISTS idx_wi_links_workitem ON conv_workitem_links(workitem_id)", ct);
     }
 
     private static async Task ApplyMigration2Async(SqliteConnection conn, CancellationToken ct)
@@ -1140,6 +1165,112 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         Confidence       = r.GetDouble(4),
         Evidence         = r.IsDBNull(5) ? null : r.GetString(5),
         CreatedAt        = DateTime.Parse(r.GetString(6))
+    };
+
+    // ── WorkItem Links (WI-987) ───────────────────────────────────────────────
+
+    public async Task CreateWorkItemLinksAsync(
+        IEnumerable<WorkItemLink> links, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var tx = conn.BeginTransaction();
+        try
+        {
+            foreach (var link in links)
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = """
+                    INSERT INTO conv_workitem_links
+                        (session_id, workitem_id, link_source, confidence, created_at)
+                    VALUES
+                        (@session_id, @workitem_id, @link_source, @confidence, @created_at)
+                    ON CONFLICT(session_id, workitem_id) DO UPDATE SET
+                        confidence  = MAX(confidence, excluded.confidence),
+                        link_source = excluded.link_source
+                    """;
+                cmd.Parameters.AddWithValue("@session_id",  link.SessionId);
+                cmd.Parameters.AddWithValue("@workitem_id", link.WorkItemId);
+                cmd.Parameters.AddWithValue("@link_source", link.LinkSource);
+                cmd.Parameters.AddWithValue("@confidence",  link.Confidence);
+                cmd.Parameters.AddWithValue("@created_at",  link.CreatedAt.ToString("O"));
+                await cmd.ExecuteNonQueryAsync(ct);
+
+                // Sync back DB-assigned Id
+                if (link.Id == 0)
+                {
+                    await using var idCmd = conn.CreateCommand();
+                    idCmd.Transaction = tx;
+                    idCmd.CommandText = """
+                        SELECT id FROM conv_workitem_links
+                        WHERE session_id = @session_id AND workitem_id = @workitem_id
+                        """;
+                    idCmd.Parameters.AddWithValue("@session_id",  link.SessionId);
+                    idCmd.Parameters.AddWithValue("@workitem_id", link.WorkItemId);
+                    var result = await idCmd.ExecuteScalarAsync(ct);
+                    if (result is long id) link.Id = id;
+                }
+            }
+            await tx.CommitAsync(ct);
+        }
+        catch
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+    }
+
+    public async Task<IReadOnlyList<WorkItemLink>> GetLinkedWorkItemsAsync(
+        long sessionId, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, session_id, workitem_id, link_source, confidence, created_at
+            FROM conv_workitem_links
+            WHERE session_id = @session_id
+            ORDER BY confidence DESC
+            """;
+        cmd.Parameters.AddWithValue("@session_id", sessionId);
+
+        var results = new List<WorkItemLink>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapWorkItemLink(reader));
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<ConversationSession>> GetSessionsForWorkItemAsync(
+        int workItemId, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT s.id, s.source, s.external_id, s.title, s.created_at, s.updated_at, s.synced_at, s.content_hash
+            FROM conv_workitem_links wl
+            JOIN conv_sessions s ON s.id = wl.session_id
+            WHERE wl.workitem_id = @workitem_id
+            ORDER BY wl.confidence DESC, s.created_at DESC
+            """;
+        cmd.Parameters.AddWithValue("@workitem_id", workItemId);
+
+        var results = new List<ConversationSession>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapSession(reader));
+
+        return results;
+    }
+
+    private static WorkItemLink MapWorkItemLink(SqliteDataReader r) => new()
+    {
+        Id         = r.GetInt64(0),
+        SessionId  = r.GetInt64(1),
+        WorkItemId = r.GetInt32(2),
+        LinkSource = r.GetString(3),
+        Confidence = r.GetDouble(4),
+        CreatedAt  = DateTime.Parse(r.GetString(5))
     };
 
     private static byte[] FloatArrayToBlob(float[] vector)

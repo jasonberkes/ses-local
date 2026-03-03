@@ -5,6 +5,7 @@ using Ses.Local.Core.Enums;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
 using Ses.Local.Core.Options;
+using Ses.Local.Workers.Services;
 using Ses.Local.Workers.Workers;
 using Xunit;
 
@@ -20,6 +21,14 @@ public sealed class ClaudeCodeWatcherObservationTests : IDisposable
 {
     private static readonly IOptions<SesLocalOptions> DefaultOptions =
         Options.Create(new SesLocalOptions { EnableClaudeCodeSync = true, PollingIntervalSeconds = 999 });
+
+    private static WorkItemLinker NoOpWorkItemLinker()
+    {
+        var db = new Mock<ILocalDbService>();
+        db.Setup(d => d.GetObservationsAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
+          .ReturnsAsync([]);
+        return new WorkItemLinker(db.Object, NullLogger<WorkItemLinker>.Instance);
+    }
 
     private readonly string _tempDir;
 
@@ -74,7 +83,7 @@ public sealed class ClaudeCodeWatcherObservationTests : IDisposable
         generator.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                  .Returns(Task.CompletedTask);
 
-        var watcher = new ClaudeCodeWatcher(db.Object, generator.Object, NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+        var watcher = new ClaudeCodeWatcher(db.Object, generator.Object, NoOpWorkItemLinker(), NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
         return (db, watcher);
     }
 
@@ -379,7 +388,7 @@ public sealed class ClaudeCodeWatcherObservationTests : IDisposable
         var generator = new Mock<IClaudeMdGenerator>();
         generator.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                  .Returns(Task.CompletedTask);
-        var watcher = new ClaudeCodeWatcher(db.Object, generator.Object, NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+        var watcher = new ClaudeCodeWatcher(db.Object, generator.Object, NoOpWorkItemLinker(), NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
 
         var jsonl = """
             {"type":"user","message":{"role":"user","content":"Write a file"},"timestamp":"2026-01-01T00:00:00Z","cwd":"/myproject"}

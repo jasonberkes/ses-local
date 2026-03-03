@@ -5,6 +5,7 @@ using Ses.Local.Core.Enums;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Options;
 using Ses.Local.Integration.Tests.Fixtures;
+using Ses.Local.Workers.Services;
 using Ses.Local.Workers.Workers;
 using Xunit;
 
@@ -37,8 +38,12 @@ public sealed class ClaudeCodeWatcherIntegrationTests : IAsyncDisposable
         var claudeMdGenerator = new Mock<IClaudeMdGenerator>();
         claudeMdGenerator.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        var wiLinkerDb = new Mock<ILocalDbService>();
+        wiLinkerDb.Setup(d => d.GetObservationsAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
+                  .ReturnsAsync([]);
+        var workItemLinker = new WorkItemLinker(wiLinkerDb.Object, NullLogger<WorkItemLinker>.Instance);
         return new ClaudeCodeWatcher(_dbFixture.Db, claudeMdGenerator.Object,
-            NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+            workItemLinker, NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
     }
 
     /// <summary>Writes JSONL to a temp file and invokes ProcessFileAsync via reflection.</summary>
