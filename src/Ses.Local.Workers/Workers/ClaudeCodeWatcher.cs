@@ -25,6 +25,7 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
 {
     private readonly ILocalDbService _db;
     private readonly IClaudeMdGenerator _claudeMdGenerator;
+    private readonly WorkItemLinker _workItemLinker;
     private readonly ILogger<ClaudeCodeWatcher> _logger;
     private readonly SesLocalOptions _options;
 
@@ -40,11 +41,13 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
     public ClaudeCodeWatcher(
         ILocalDbService db,
         IClaudeMdGenerator claudeMdGenerator,
+        WorkItemLinker workItemLinker,
         ILogger<ClaudeCodeWatcher> logger,
         IOptions<SesLocalOptions> options)
     {
         _db                 = db;
         _claudeMdGenerator  = claudeMdGenerator;
+        _workItemLinker     = workItemLinker;
         _logger             = logger;
         _options            = options.Value;
     }
@@ -266,6 +269,9 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
             // Regenerate CLAUDE.md for this project so the next session starts with context
             if (!string.IsNullOrEmpty(cwd))
                 _ = _claudeMdGenerator.GenerateAsync(cwd, ct);
+
+            // Auto-link session to WorkItems referenced in branch name, commits, or content (WI-987)
+            _ = _workItemLinker.ProcessSessionAsync(session.Id, cwd, ct);
         }
 
         // Record metrics for this session

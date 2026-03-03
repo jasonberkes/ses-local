@@ -152,6 +152,9 @@ public static class DependencyInjection
         // Cross-session conversation linker (WI-986) — run after each compression
         services.AddSingleton<ConversationLinker>();
 
+        // WorkItem auto-linker (WI-987) — detects WI references in branch names, commits, and content
+        services.AddSingleton<WorkItemLinker>();
+
         services.AddHostedService<CompressionWorker>();
 
         // CLAUDE.md auto-generation (WI-982)

@@ -137,4 +137,21 @@ public interface ILocalDbService
     /// </summary>
     Task<IReadOnlyList<ConversationRelationship>> GetRelatedSessionsAsync(
         long sessionId, CancellationToken ct = default);
+
+    // ── WorkItem Links (WI-987) ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Inserts WorkItem links for a session. On conflict (session_id, workitem_id), keeps
+    /// the higher confidence value and updates the link source.
+    /// Syncs back the DB-assigned Id on each item.
+    /// </summary>
+    Task CreateWorkItemLinksAsync(IEnumerable<WorkItemLink> links, CancellationToken ct = default);
+
+    /// <summary>Returns all WorkItem links for a session, ordered by confidence descending.</summary>
+    Task<IReadOnlyList<WorkItemLink>> GetLinkedWorkItemsAsync(long sessionId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns all sessions linked to a given WorkItem ID, ordered by confidence descending.
+    /// </summary>
+    Task<IReadOnlyList<ConversationSession>> GetSessionsForWorkItemAsync(int workItemId, CancellationToken ct = default);
 }

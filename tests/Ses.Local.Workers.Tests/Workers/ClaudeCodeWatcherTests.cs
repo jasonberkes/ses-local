@@ -5,6 +5,7 @@ using Ses.Local.Core.Enums;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
 using Ses.Local.Core.Options;
+using Ses.Local.Workers.Services;
 using Ses.Local.Workers.Workers;
 using Xunit;
 
@@ -23,12 +24,20 @@ public sealed class ClaudeCodeWatcherTests
         return gen;
     }
 
+    private static WorkItemLinker NoOpWorkItemLinker()
+    {
+        var db = new Mock<ILocalDbService>();
+        db.Setup(d => d.GetObservationsAsync(It.IsAny<long>(), It.IsAny<CancellationToken>()))
+          .ReturnsAsync([]);
+        return new WorkItemLinker(db.Object, NullLogger<WorkItemLinker>.Instance);
+    }
+
     [Fact]
     public async Task ExecuteAsync_WhenDisabled_DoesNotStart()
     {
         var db      = new Mock<ILocalDbService>();
         var options = Options.Create(new SesLocalOptions { EnableClaudeCodeSync = false });
-        var watcher = new ClaudeCodeWatcher(db.Object, NoOpGenerator().Object, NullLogger<ClaudeCodeWatcher>.Instance, options);
+        var watcher = new ClaudeCodeWatcher(db.Object, NoOpGenerator().Object, NoOpWorkItemLinker(), NullLogger<ClaudeCodeWatcher>.Instance, options);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
         await watcher.StartAsync(cts.Token);
@@ -40,7 +49,7 @@ public sealed class ClaudeCodeWatcherTests
     public async Task ExecuteAsync_WhenProjectsDirMissing_DoesNotThrow()
     {
         var db      = new Mock<ILocalDbService>();
-        var watcher = new ClaudeCodeWatcher(db.Object, NoOpGenerator().Object, NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+        var watcher = new ClaudeCodeWatcher(db.Object, NoOpGenerator().Object, NoOpWorkItemLinker(), NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
         // Should not throw even if ~/.claude/projects doesn't exist
@@ -75,7 +84,7 @@ public sealed class ClaudeCodeWatcherTests
           .Callback<IEnumerable<ConversationMessage>, CancellationToken>((msgs, _) => capturedMessages = [.. msgs])
           .Returns(Task.CompletedTask);
 
-        var watcher = new ClaudeCodeWatcher(db.Object, NoOpGenerator().Object, NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+        var watcher = new ClaudeCodeWatcher(db.Object, NoOpGenerator().Object, NoOpWorkItemLinker(), NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
 
         // Use reflection to call the private ProcessFileAsync
         var method = typeof(ClaudeCodeWatcher).GetMethod("ProcessFileAsync",
