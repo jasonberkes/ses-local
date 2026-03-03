@@ -6,5 +6,6 @@ public enum ConversationSource
     ClaudeChat,
     ClaudeCode,
     Cowork,
-    ChatGpt
+    ChatGpt,
+    Gemini
 }
