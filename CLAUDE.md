@@ -34,6 +34,14 @@ Two independent binaries communicate over Unix domain socket IPC:
 - Resets retry counter after 60 s of stable running
 - On tray quit: sends `POST /api/shutdown`, waits 5 s, then kills process
 
+**Tray UI — DropdownPanel (TRAY-7)**: Left-click on the tray icon toggles a Docker Desktop-style floating dropdown panel (`DropdownPanel.axaml`):
+- Anchored below the menu bar, top-right of screen, 400 px wide, `SystemDecorations="None"`, `Topmost="True"`
+- Dismisses on click-outside (`Deactivated` event), Escape key, or clicking the tray icon again
+- Four tabs: **Status** (feature toggles), **CC Config** (placeholder, TRAY-1/2/3), **Import** (placeholder, TRAY-5), **Settings** (sign-out)
+- Right-click NativeMenu remains for quick actions (Sign In, Import, Configure MCP, Stop Daemon, Quit)
+- `DropdownPanelViewModel` uses `StatusDot` enum (not strings) for `StatusDotColor`; binds through `DotColorConverter`
+- TrayApp passes its already-fetched `SesAuthState` to `panel.RefreshStatus(state)` — avoids a second daemon round-trip per timer tick
+
 **launchd**: Only the tray app has a launchd plist (`com.supereasysoftware.ses-local-tray.plist`).
 The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but kept for existing installs.
 
@@ -46,7 +54,7 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 | Project | Tests | Coverage |
 |---------|-------|----------|
 | `Ses.Local.Core.Tests` | 49 | Options validation, model serialization, utility services |
-| `Ses.Local.Workers.Tests` | 350 | Worker unit tests, service tests, telemetry, ViewModels, DaemonSupervisor |
+| `Ses.Local.Workers.Tests` | 358 | Worker unit tests, service tests, telemetry, ViewModels, DaemonSupervisor |
 | `Ses.Local.Integration.Tests` | 33 | SQLite CRUD, vector search, JSONL parsing (real temp DB) |
 
 ## Key Patterns
