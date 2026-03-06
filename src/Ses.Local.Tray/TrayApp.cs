@@ -437,7 +437,7 @@ public partial class TrayApp : Application
         {
             var vm = new DropdownPanelViewModel(auth, daemonProxy, opts);
             _dropdownPanel = new DropdownPanel(vm);
-            _dropdownPanel.Closed += (_, _) => _dropdownPanel = null;
+            _dropdownPanel.Closed += (_, _) => { vm.Dispose(); _dropdownPanel = null; };
         }
 
         _dropdownPanel.Show();

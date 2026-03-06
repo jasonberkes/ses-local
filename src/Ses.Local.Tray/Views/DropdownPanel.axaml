@@ -199,11 +199,97 @@
           </StackPanel>
 
           <!-- CC Config tab -->
-          <StackPanel IsVisible="{Binding IsCcConfigTab}" Margin="16,24">
-            <TextBlock Text="Claude Code configuration"
-                       FontSize="14" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
-            <TextBlock Text="Coming in TRAY-1/2/3"
-                       FontSize="13" Foreground="#888888" TextWrapping="Wrap"/>
+          <StackPanel IsVisible="{Binding IsCcConfigTab}">
+
+            <!-- MODEL -->
+            <TextBlock Text="MODEL" Classes="sectionHeader"/>
+            <Border Classes="featureRow">
+              <ComboBox ItemsSource="{Binding CcAvailableModels}"
+                        SelectedItem="{Binding CcModelName, Mode=OneWay}"
+                        Background="#3A3A3C" Foreground="White"
+                        BorderThickness="0" FontSize="12"
+                        SelectionChanged="OnModelSelectionChanged"/>
+            </Border>
+            <TextBlock Text="Restart Claude Code for model changes to take effect."
+                       FontSize="11" Foreground="#555555" Margin="16,2,16,0"/>
+
+            <!-- PERMISSIONS -->
+            <TextBlock Text="PERMISSIONS" Classes="sectionHeader"/>
+            <Border Classes="featureRow">
+              <StackPanel Orientation="Vertical" Spacing="3">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="Allow: " FontSize="12" Foreground="#888888"/>
+                  <TextBlock Text="{Binding CcPermissionsAllow}" FontSize="12" Foreground="White"
+                             TextWrapping="Wrap"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="Deny: " FontSize="12" Foreground="#888888"/>
+                  <TextBlock Text="{Binding CcPermissionsDeny}" FontSize="12" Foreground="White"
+                             TextWrapping="Wrap"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <!-- MCP SERVERS -->
+            <TextBlock Text="MCP SERVERS" Classes="sectionHeader"/>
+            <ItemsControl ItemsSource="{Binding CcMcpServers}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Classes="featureRow">
+                    <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                      <Ellipse Classes="statusDot" VerticalAlignment="Center"
+                               Fill="{Binding IsAvailable, Converter={StaticResource BoolToDotConverter}}"/>
+                      <TextBlock Grid.Column="1" Text="{Binding Name}"
+                                 FontSize="13" Foreground="White" VerticalAlignment="Center"
+                                 Margin="0,0,8,0"/>
+                      <StackPanel Grid.Column="2" Orientation="Vertical">
+                        <TextBlock Text="{Binding ConnectionType}" FontSize="11" Foreground="#888888"/>
+                        <TextBlock Text="{Binding Target}" FontSize="11" Foreground="#666666"
+                                   TextTrimming="CharacterEllipsis"/>
+                      </StackPanel>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Border Padding="16,8">
+              <Button Content="Configure MCP Servers..." Classes="footerBtn"
+                      Foreground="#0A84FF" FontSize="12"/>
+            </Border>
+
+            <!-- HOOKS -->
+            <TextBlock Text="HOOKS" Classes="sectionHeader"/>
+            <Border Classes="featureRow">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="{Binding CcHooksSummary}" FontSize="12" Foreground="White"
+                           TextWrapping="Wrap" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Content="Toggle Hooks" Classes="footerBtn"
+                        Foreground="#0A84FF" FontSize="12"/>
+              </Grid>
+            </Border>
+
+            <!-- SETTINGS FILES -->
+            <TextBlock Text="SETTINGS FILES" Classes="sectionHeader"/>
+            <Border Classes="featureRow">
+              <StackPanel Orientation="Vertical" Spacing="6">
+                <StackPanel Orientation="Vertical">
+                  <TextBlock Text="~/.claude/settings.json" FontSize="12" Foreground="White"/>
+                  <TextBlock Text="{Binding CcSettingsFileAge, StringFormat='Modified: {0}'}"
+                             FontSize="11" Foreground="#888888"/>
+                </StackPanel>
+                <StackPanel Orientation="Vertical">
+                  <TextBlock Text="~/.claude/settings.local.json" FontSize="12" Foreground="White"/>
+                  <TextBlock Text="{Binding CcLocalSettingsFileAge, StringFormat='Modified: {0}'}"
+                             FontSize="11" Foreground="#888888"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+            <Border Padding="16,8">
+              <Button Content="Open in Editor" Classes="footerBtn"
+                      Foreground="#0A84FF" FontSize="12"
+                      Click="OnOpenCcSettingsClick"/>
+            </Border>
+
           </StackPanel>
 
           <!-- Import tab -->

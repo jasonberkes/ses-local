@@ -11,7 +11,7 @@ namespace Ses.Local.Tray.ViewModels;
 
 public enum PanelTab { Status, CcConfig, Import, Settings }
 
-public sealed class DropdownPanelViewModel : INotifyPropertyChanged
+public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly IAuthService _auth;
     private readonly DaemonAuthProxy _daemonProxy;
@@ -24,6 +24,55 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged
     private readonly string _appVersion;
     private FeatureStatus[] _allFeatures = [];
     private SesConfig? _config;
+    private readonly ClaudeCodeSettingsService _ccSettings;
+    private readonly bool _ownsCcSettings;
+
+    // ── CC Config tab state ───────────────────────────────────────────────────
+    private string _ccModelName = "default";
+    private string _ccPermissionsAllow = "(none)";
+    private string _ccPermissionsDeny = "(none)";
+    private string _ccSettingsFileAge = "—";
+    private string _ccLocalSettingsFileAge = "—";
+    private string _ccHooksSummary = "(none)";
+
+    public string CcModelName
+    {
+        get => _ccModelName;
+        set { _ccModelName = value; OnPropertyChanged(); }
+    }
+
+    public string CcPermissionsAllow
+    {
+        get => _ccPermissionsAllow;
+        set { _ccPermissionsAllow = value; OnPropertyChanged(); }
+    }
+
+    public string CcPermissionsDeny
+    {
+        get => _ccPermissionsDeny;
+        set { _ccPermissionsDeny = value; OnPropertyChanged(); }
+    }
+
+    public string CcSettingsFileAge
+    {
+        get => _ccSettingsFileAge;
+        set { _ccSettingsFileAge = value; OnPropertyChanged(); }
+    }
+
+    public string CcLocalSettingsFileAge
+    {
+        get => _ccLocalSettingsFileAge;
+        set { _ccLocalSettingsFileAge = value; OnPropertyChanged(); }
+    }
+
+    public string CcHooksSummary
+    {
+        get => _ccHooksSummary;
+        set { _ccHooksSummary = value; OnPropertyChanged(); }
+    }
+
+    public ObservableCollection<McpServerInfo> CcMcpServers { get; } = [];
+    public string[] CcAvailableModels { get; } = ClaudeCodeSettingsService.CommonModels;
 
     // Direct refs to fixed component items — avoids FirstOrDefault string searches
     private ComponentStatus _daemonStatus  = null!;
@@ -81,12 +130,16 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged
 
     public string AppVersion => _appVersion;
 
-    public DropdownPanelViewModel(IAuthService auth, DaemonAuthProxy daemonProxy, IOptions<SesLocalOptions> options)
+    public DropdownPanelViewModel(IAuthService auth, DaemonAuthProxy daemonProxy, IOptions<SesLocalOptions> options,
+        ClaudeCodeSettingsService? ccSettings = null)
     {
         _auth            = auth;
         _daemonProxy     = daemonProxy;
         _troubleshootUrl = options.Value.DocsBaseUrl.TrimEnd('/') + "/ses-local/troubleshoot";
         _appVersion      = GetAppVersion();
+        _ownsCcSettings = ccSettings is null;
+        _ccSettings = ccSettings ?? new ClaudeCodeSettingsService();
+        _ccSettings.SettingsChanged += (_, _) => RefreshCcConfig();
         InitFeatures();
         InitComponents();
         _ = LoadAsync();
@@ -235,7 +288,76 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged
         await UpdateStatusAsync(ct);
     }
 
-    public void SelectTab(PanelTab tab) => SelectedTab = tab;
+    public void SelectTab(PanelTab tab)
+    {
+        SelectedTab = tab;
+        if (tab == PanelTab.CcConfig)
+            RefreshCcConfig();
+    }
+
+    public void RefreshCcConfig()
+    {
+        try
+        {
+            var info = _ccSettings.ReadSettings();
+            CcModelName         = info.ModelName;
+            CcPermissionsAllow  = info.PermissionsAllow.Count > 0
+                ? string.Join(", ", info.PermissionsAllow) : "(none)";
+            CcPermissionsDeny   = info.PermissionsDeny.Count > 0
+                ? string.Join(", ", info.PermissionsDeny) : "(none)";
+            CcHooksSummary      = info.RegisteredHooks.Count > 0
+                ? string.Join(", ", info.RegisteredHooks) : "(none)";
+            CcSettingsFileAge      = FormatAge(info.SettingsLastModified);
+            CcLocalSettingsFileAge = FormatAge(info.LocalSettingsLastModified);
+
+            CcMcpServers.Clear();
+            foreach (var s in info.McpServers)
+                CcMcpServers.Add(s);
+        }
+        catch { /* read error — leave existing values */ }
+    }
+
+    public void ChangeCcModel(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model)) return;
+        _ccSettings.WriteModelName(model);
+        CcModelName = model;
+    }
+
+    public void OpenCcSettingsFile()
+    {
+        var path = _ccSettings.SettingsFilePath;
+        if (!File.Exists(path)) return;
+
+        try
+        {
+            if (OperatingSystem.IsMacOS())
+            {
+                // Try VS Code first, fall back to TextEdit
+                var vscode = System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("code", path) { UseShellExecute = true });
+                if (vscode is null)
+                    System.Diagnostics.Process.Start("open", $"-a TextEdit \"{path}\"");
+            }
+            else if (OperatingSystem.IsWindows())
+            {
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo("notepad", path) { UseShellExecute = true });
+            }
+        }
+        catch { /* non-fatal */ }
+    }
+
+    private static string FormatAge(DateTime? dt)
+    {
+        if (dt is null) return "not found";
+        var age = DateTime.Now - dt.Value;
+        return age.TotalSeconds < 60  ? "just now" :
+               age.TotalMinutes < 60  ? $"{(int)age.TotalMinutes} minutes ago" :
+               age.TotalHours < 24    ? $"{(int)age.TotalHours} hours ago" :
+               age.TotalDays < 7     ? $"{(int)age.TotalDays} days ago" :
+                                        dt.Value.ToString("yyyy-MM-dd");
+    }
 
     public void OpenTroubleshoot() => OpenUrl(_troubleshootUrl);
 
@@ -255,6 +377,12 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged
     {
         var v = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version;
         return v is null ? "1.0.0" : $"{v.Major}.{v.Minor}.{v.Build}";
+    }
+
+    public void Dispose()
+    {
+        if (_ownsCcSettings)
+            _ccSettings.Dispose();
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
