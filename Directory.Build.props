@@ -24,4 +24,14 @@
     <DebugType>portable</DebugType>
     <Optimize>true</Optimize>
   </PropertyGroup>
+  <!-- Trimming: only exe projects that opt in via <IsTrimmableExe>true</IsTrimmableExe> -->
+  <PropertyGroup Condition="'$(IsTrimmableExe)' == 'true'">
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Keep reflection-based JSON serialization; our workers use JsonSerializer with runtime types -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- All types preserved via trimmer-roots.xml; JSON reflection warnings are safe to suppress -->
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+  </PropertyGroup>
 </Project>

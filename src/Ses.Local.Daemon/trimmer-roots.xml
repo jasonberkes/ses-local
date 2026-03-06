@@ -1,0 +1,5 @@
+<linker>
+  <assembly fullname="ses-local-daemon" preserve="all" />
+  <assembly fullname="Ses.Local.Core" preserve="all" />
+  <assembly fullname="Ses.Local.Workers" preserve="all" />
+</linker>
