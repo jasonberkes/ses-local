@@ -5,6 +5,7 @@
   <Application.Resources>
     <ResourceDictionary>
       <local:DotColorConverter x:Key="DotColorConverter"/>
+      <local:BoolToDotConverter x:Key="BoolToDotConverter"/>
     </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>

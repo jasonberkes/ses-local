@@ -75,4 +75,16 @@ public partial class DropdownPanel : Window
     {
         if (_vm is not null) await _vm.SignOutAsync();
     }
+
+    // ── CC Config tab ────────────────────────────────────────────────────────
+
+    private void OnModelSelectionChanged(object? sender, Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        if (_vm is null || sender is not Avalonia.Controls.ComboBox cb) return;
+        if (cb.SelectedItem is string model)
+            _vm.ChangeCcModel(model);
+    }
+
+    private void OnOpenCcSettingsClick(object? sender, RoutedEventArgs e) =>
+        _vm?.OpenCcSettingsFile();
 }
