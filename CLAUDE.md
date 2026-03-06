@@ -15,8 +15,27 @@ ses-local is the Super Easy Software Local application — a cross-platform desk
 | `Ses.Local.Core` | Library | Shared models, interfaces, options (`SesLocalOptions`), enums, events |
 | `Ses.Local.Daemon` | Exe (`ses-local-daemon`) | Headless background service over Unix domain socket (`~/.ses/local.sock`), hosts all workers, OpenTelemetry, single-instance mutex |
 | `Ses.Local.Hooks` | Exe (`ses-hooks`, AOT) | Claude Code lifecycle hooks binary — fast 3s timeout, direct SQLite fallback if daemon unavailable |
-| `Ses.Local.Tray` | WinExe | Avalonia system tray app — feature flag UI, license activation, MCP server provisioning |
+| `Ses.Local.Tray` | WinExe | Avalonia system tray app — menu-bar only (no Dock icon), supervises daemon via `DaemonSupervisor` |
 | `Ses.Local.Workers` | Library | All background workers, sync services, HTTP clients, compression, embedding, telemetry |
+
+### Daemon / Tray Architecture (WI-970)
+
+Two independent binaries communicate over Unix domain socket IPC:
+
+| Binary | Path | Purpose |
+|--------|------|---------|
+| `ses-local.app` | `~/.ses/ses-local.app` | Tray app — system tray icon, menu, UI. Starts on login via launchd. |
+| `ses-local-daemon` | `~/.ses/bin/ses-local-daemon` | Headless daemon — all workers, Kestrel over UDS, no UI. Supervised by tray. |
+
+**Lifecycle**: The tray app owns the daemon lifecycle via `DaemonSupervisor`:
+- On tray startup, checks if daemon socket exists (already running) or launches the daemon binary
+- Monitors daemon health via process `HasExited` / socket availability (every 10 s)
+- On crash: exponential backoff restart — 5 s → 15 s → 45 s (max 3 attempts)
+- Resets retry counter after 60 s of stable running
+- On tray quit: sends `POST /api/shutdown`, waits 5 s, then kills process
+
+**launchd**: Only the tray app has a launchd plist (`com.supereasysoftware.ses-local-tray.plist`).
+The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but kept for existing installs.
 
 ### Browser Extension
 
@@ -27,7 +46,7 @@ ses-local is the Super Easy Software Local application — a cross-platform desk
 | Project | Tests | Coverage |
 |---------|-------|----------|
 | `Ses.Local.Core.Tests` | 49 | Options validation, model serialization, utility services |
-| `Ses.Local.Workers.Tests` | 341 | Worker unit tests, service tests, telemetry, ViewModels |
+| `Ses.Local.Workers.Tests` | 350 | Worker unit tests, service tests, telemetry, ViewModels, DaemonSupervisor |
 | `Ses.Local.Integration.Tests` | 33 | SQLite CRUD, vector search, JSONL parsing (real temp DB) |
 
 ## Key Patterns

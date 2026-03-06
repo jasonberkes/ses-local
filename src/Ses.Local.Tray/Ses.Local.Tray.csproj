@@ -10,6 +10,10 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\tray-icon.png" />
+    <!-- Expose internal types (ILaunchedProcess, FakeLaunchedProcess, etc.) to the test project -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Ses.Local.Workers.Tests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Ses.Local.Core\Ses.Local.Core.csproj" />

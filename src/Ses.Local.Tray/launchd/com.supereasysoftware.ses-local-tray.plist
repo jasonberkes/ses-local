@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for ses-local tray app (login-item replacement).
+
+  The tray app manages the daemon lifecycle via DaemonSupervisor — it starts the
+  daemon on launch and restarts it on crash. There is no separate launchd agent
+  for the daemon when using this approach.
+
+  Install to ~/Library/LaunchAgents/com.supereasysoftware.ses-local-tray.plist
+  NOTE: launchd does NOT expand ~ in paths. Use the full path or let the
+  installer resolve it.
+
+  Load:   launchctl load   ~/Library/LaunchAgents/com.supereasysoftware.ses-local-tray.plist
+  Unload: launchctl unload ~/Library/LaunchAgents/com.supereasysoftware.ses-local-tray.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.supereasysoftware.ses-local-tray</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>open</string>
+    <string>-a</string>
+    <string>~/.ses/ses-local.app</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Tray manages its own restart; launchd should not restart it automatically -->
+  <key>KeepAlive</key>
+  <false/>
+</dict>
+</plist>

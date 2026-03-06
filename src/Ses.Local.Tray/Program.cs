@@ -37,6 +37,9 @@ internal static class Program
 
                 // MCP config manager — reads/writes host config files
                 services.AddSingleton<IMcpConfigManager, McpConfigManager>();
+
+                // DaemonSupervisor manages daemon lifecycle with crash recovery
+                services.AddSingleton<DaemonSupervisor>();
             })
             .Build();
 
@@ -50,5 +53,6 @@ internal static class Program
     private static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<TrayApp>()
             .UsePlatformDetect()
+            .With(new MacOSPlatformOptions { ShowInDock = false })
             .LogToTrace();
 }
