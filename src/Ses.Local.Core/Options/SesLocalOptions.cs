@@ -30,9 +30,6 @@ public sealed class SesLocalOptions
     public string SesLocalManifestUrl { get; init; } =
         "https://tmprodeus2data.blob.core.windows.net/artifacts/ses-local/latest.json";
 
-    /// <summary>ses-cloud MCP proxy URL.</summary>
-    public string CloudMcpUrl { get; init; } = "https://mcp.tm.supereasysoftware.com/mcp";
-
     /// <summary>Documentation site base URL.</summary>
     public string DocsBaseUrl { get; init; } = "https://docs.supereasysoftware.com";
 

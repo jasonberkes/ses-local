@@ -22,7 +22,6 @@ public sealed class SesLocalOptionsValidatorTests
     [InlineData("ClaudeAiBaseUrl")]
     [InlineData("SesMcpManifestUrl")]
     [InlineData("SesLocalManifestUrl")]
-    [InlineData("CloudMcpUrl")]
     [InlineData("DocsBaseUrl")]
     public void Validate_EmptyUrl_ReturnsFailure(string propertyName)
     {
@@ -54,14 +53,13 @@ public sealed class SesLocalOptionsValidatorTests
     {
         var options = new SesLocalOptions
         {
-            IdentityBaseUrl       = "https://identity.example.com",
+            IdentityBaseUrl        = "https://identity.example.com",
             DocumentServiceBaseUrl = "https://docs.example.com",
-            MemoryBaseUrl         = "https://memory.example.com",
-            ClaudeAiBaseUrl       = "https://claude.example.com",
-            SesMcpManifestUrl     = "https://storage.example.com/ses-mcp/latest.json",
-            SesLocalManifestUrl   = "https://storage.example.com/ses-local/latest.json",
-            CloudMcpUrl           = "https://mcp.example.com/mcp",
-            DocsBaseUrl           = "https://docs.example.com"
+            MemoryBaseUrl          = "https://memory.example.com",
+            ClaudeAiBaseUrl        = "https://claude.example.com",
+            SesMcpManifestUrl      = "https://storage.example.com/ses-mcp/latest.json",
+            SesLocalManifestUrl    = "https://storage.example.com/ses-local/latest.json",
+            DocsBaseUrl            = "https://docs.example.com"
         };
 
         var result = Sut.Validate(null, options);
@@ -95,10 +93,9 @@ public sealed class SesLocalOptionsValidatorTests
             "DocumentServiceBaseUrl" => new SesLocalOptions { DocumentServiceBaseUrl = "" },
             "MemoryBaseUrl"         => new SesLocalOptions { MemoryBaseUrl         = "" },
             "ClaudeAiBaseUrl"       => new SesLocalOptions { ClaudeAiBaseUrl       = "" },
-            "SesMcpManifestUrl"     => new SesLocalOptions { SesMcpManifestUrl     = "" },
-            "SesLocalManifestUrl"   => new SesLocalOptions { SesLocalManifestUrl   = "" },
-            "CloudMcpUrl"           => new SesLocalOptions { CloudMcpUrl           = "" },
-            "DocsBaseUrl"           => new SesLocalOptions { DocsBaseUrl           = "" },
+            "SesMcpManifestUrl"     => new SesLocalOptions { SesMcpManifestUrl   = "" },
+            "SesLocalManifestUrl"   => new SesLocalOptions { SesLocalManifestUrl = "" },
+            "DocsBaseUrl"           => new SesLocalOptions { DocsBaseUrl         = "" },
             _ => throw new ArgumentException($"Unknown property: {propertyName}")
         };
     }

@@ -13,6 +13,7 @@ public sealed class SesMcpHealthStatus
     public bool IsInstalled { get; set; }
     public bool IsConfigured { get; set; }
     public bool HasConfigDrift { get; set; }
+    public bool SesHooksInstalled { get; set; }
     public string? InstalledVersion { get; set; }
     public string? ConfigPath { get; set; }
 }
@@ -30,13 +31,10 @@ public sealed class SesMcpManager
     private readonly SesMcpUpdater _updater;
     private readonly IAuthService _auth;
     private readonly ILogger<SesMcpManager> _logger;
-    private readonly string _cloudMcpUrl;
     private readonly string _sesMcpManifestUrl;
 
     private const string SesLocalMcpKey = "ses-local";
-    private const string SesCloudMcpKey = "ses-cloud";
     private static readonly string[] SesLocalArgs = ["--transport", "stdio", "--skip-update"];
-    private string[] SesCloudArgs => ["-y", "@anthropic-ai/mcp-proxy", _cloudMcpUrl];
 
     public SesMcpManager(
         IHttpClientFactory httpClientFactory,
@@ -51,7 +49,6 @@ public sealed class SesMcpManager
         _updater           = updater;
         _auth              = auth;
         _logger            = logger;
-        _cloudMcpUrl       = options.Value.CloudMcpUrl;
         _sesMcpManifestUrl = options.Value.SesMcpManifestUrl;
     }
 
@@ -89,8 +86,24 @@ public sealed class SesMcpManager
 
         // 4. Register ses-hooks in ~/.claude/settings.json for Claude Code
         await CheckAndRepairClaudeCodeHooksAsync(ct);
+        status.SesHooksInstalled = File.Exists(GetSesHooksBinaryPath());
 
         return status;
+    }
+
+    /// <summary>
+    /// Returns a snapshot of the current component install state without performing any repairs.
+    /// Safe to call from read-only status endpoints.
+    /// </summary>
+    public SesMcpHealthStatus GetStatus()
+    {
+        var binaryPath = SesMcpUpdater.GetSesMcpBinaryPath();
+        return new SesMcpHealthStatus
+        {
+            IsInstalled      = File.Exists(binaryPath),
+            ConfigPath       = GetClaudeDesktopConfigPath(),
+            SesHooksInstalled = File.Exists(GetSesHooksBinaryPath()),
+        };
     }
 
     // ── Installation ──────────────────────────────────────────────────────────
@@ -165,7 +178,7 @@ public sealed class SesMcpManager
             var config = ClaudeDesktopConfig.Load(configPath);
             string? plainTextPat = null;
 
-            // Look for PAT in ses-local or ses-cloud MCP_HEADERS
+            // Look for PAT in ses-local MCP_HEADERS (scans all servers as fallback)
             foreach (var server in config.McpServers.Values)
             {
                 if (server.Env is null) continue;
@@ -223,6 +236,13 @@ public sealed class SesMcpManager
 
         bool hasDrift = false;
 
+        // Clean up deprecated ses-cloud entry
+        if (config.McpServers.Remove("ses-cloud"))
+        {
+            hasDrift = true;
+            _logger.LogInformation("Removed deprecated ses-cloud entry from Claude Desktop config");
+        }
+
         // Check ses-local entry
         if (!config.McpServers.TryGetValue(SesLocalMcpKey, out var sesLocal)
             || sesLocal.Command != binaryPath
@@ -230,14 +250,6 @@ public sealed class SesMcpManager
         {
             hasDrift = true;
             _logger.LogInformation("Claude Desktop ses-local config drift detected — repairing");
-        }
-
-        // Check ses-cloud entry
-        if (!config.McpServers.TryGetValue(SesCloudMcpKey, out var sesCloud)
-            || sesCloud.Command != "npx"
-            || !sesCloud.Args.SequenceEqual(SesCloudArgs))
-        {
-            hasDrift = true;
         }
 
         if (hasDrift)
@@ -248,13 +260,6 @@ public sealed class SesMcpManager
             {
                 Command = binaryPath,
                 Args    = [.. SesLocalArgs],
-                Env     = new Dictionary<string, string> { ["MCP_HEADERS"] = authHeader }
-            };
-
-            config.McpServers[SesCloudMcpKey] = new McpServerEntry
-            {
-                Command = "npx",
-                Args    = [.. SesCloudArgs],
                 Env     = new Dictionary<string, string> { ["MCP_HEADERS"] = authHeader }
             };
 

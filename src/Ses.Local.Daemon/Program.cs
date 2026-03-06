@@ -157,6 +157,30 @@ internal static class Program
             return Results.Ok(new { message = "Signed out" });
         });
 
+        app.MapGet("/api/components", (SesMcpManager mcpManager) =>
+        {
+            var health = mcpManager.GetStatus();
+            return Results.Ok(new
+            {
+                sesMcp = new
+                {
+                    installed  = health.IsInstalled,
+                    configured = health.IsConfigured,
+                    version    = health.InstalledVersion
+                },
+                daemon = new
+                {
+                    installed = true,
+                    version   = System.Reflection.Assembly.GetExecutingAssembly()
+                                    .GetName().Version?.ToString(3)
+                },
+                sesHooks = new
+                {
+                    installed = health.SesHooksInstalled
+                }
+            });
+        });
+
         app.MapPost("/api/shutdown", (IHostApplicationLifetime lifetime) =>
         {
             lifetime.StopApplication();

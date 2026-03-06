@@ -3,6 +3,7 @@ using Moq;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
 using Ses.Local.Core.Options;
+using Ses.Local.Tray.Services;
 using Ses.Local.Tray.ViewModels;
 using Xunit;
 
@@ -10,6 +11,9 @@ namespace Ses.Local.Workers.Tests.ViewModels;
 
 public sealed class DropdownPanelViewModelTests
 {
+    // DaemonAuthProxy constructor only registers a connect callback — no actual socket connection until first request.
+    private static readonly DaemonAuthProxy s_fakeProxy = new(Options.Create(new SesLocalOptions()));
+
     private static DropdownPanelViewModel CreateVm(IAuthService? auth = null)
     {
         if (auth is null)
@@ -18,7 +22,7 @@ public sealed class DropdownPanelViewModelTests
             mock.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
             auth = mock.Object;
         }
-        return new DropdownPanelViewModel(auth, Options.Create(new SesLocalOptions()));
+        return new DropdownPanelViewModel(auth, s_fakeProxy, Options.Create(new SesLocalOptions()));
     }
 
     [Fact]
@@ -59,7 +63,7 @@ public sealed class DropdownPanelViewModelTests
         auth.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
         auth.Setup(x => x.SignOutAsync(default)).Returns(Task.CompletedTask);
 
-        var vm = new DropdownPanelViewModel(auth.Object, Options.Create(new SesLocalOptions()));
+        var vm = new DropdownPanelViewModel(auth.Object, s_fakeProxy, Options.Create(new SesLocalOptions()));
         await vm.SignOutAsync();
 
         auth.Verify(x => x.SignOutAsync(default), Times.Once);
@@ -133,7 +137,7 @@ public sealed class DropdownPanelViewModelTests
         auth.Setup(x => x.GetStateAsync(default))
             .ReturnsAsync(new SesAuthState { IsAuthenticated = true });
 
-        var vm = new DropdownPanelViewModel(auth.Object, Options.Create(new SesLocalOptions()));
+        var vm = new DropdownPanelViewModel(auth.Object, s_fakeProxy, Options.Create(new SesLocalOptions()));
         await vm.UpdateStatusAsync();
 
         Assert.Equal(StatusDot.Green, vm.StatusDotColor);
@@ -146,7 +150,7 @@ public sealed class DropdownPanelViewModelTests
         var auth = new Mock<IAuthService>();
         auth.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
 
-        var vm = new DropdownPanelViewModel(auth.Object, Options.Create(new SesLocalOptions()));
+        var vm = new DropdownPanelViewModel(auth.Object, s_fakeProxy, Options.Create(new SesLocalOptions()));
         await vm.UpdateStatusAsync();
 
         Assert.Equal(StatusDot.Grey,   vm.StatusDotColor);
@@ -159,7 +163,7 @@ public sealed class DropdownPanelViewModelTests
         var auth = new Mock<IAuthService>();
         auth.Setup(x => x.GetStateAsync(default)).ThrowsAsync(new Exception("daemon down"));
 
-        var vm = new DropdownPanelViewModel(auth.Object, Options.Create(new SesLocalOptions()));
+        var vm = new DropdownPanelViewModel(auth.Object, s_fakeProxy, Options.Create(new SesLocalOptions()));
         await vm.UpdateStatusAsync();
 
         Assert.Equal(StatusDot.Red,        vm.StatusDotColor);
@@ -182,11 +186,32 @@ public sealed class DropdownPanelViewModelTests
             });
         auth.Setup(x => x.SignOutAsync(default)).Returns(Task.CompletedTask);
 
-        var vm = new DropdownPanelViewModel(auth.Object, Options.Create(new SesLocalOptions()));
+        var vm = new DropdownPanelViewModel(auth.Object, s_fakeProxy, Options.Create(new SesLocalOptions()));
         await vm.SignOutAsync();
 
         Assert.Equal(StatusDot.Grey,  vm.StatusDotColor);
         Assert.Equal("Not activated", vm.StatusText);
         Assert.Equal("Signed out",    vm.UserDisplayName);
+    }
+
+    [Fact]
+    public void Constructor_InitializesComponents()
+    {
+        var vm = CreateVm();
+
+        Assert.Equal(3, vm.Components.Count);
+        Assert.Equal("ses-local-daemon", vm.Components[0].Name);
+        Assert.Equal("ses-mcp",          vm.Components[1].Name);
+        Assert.Equal("ses-hooks",        vm.Components[2].Name);
+    }
+
+    [Fact]
+    public async Task RefreshComponentsAsync_WhenDaemonUnreachable_SetsErrorState()
+    {
+        // DaemonAuthProxy will fail to connect since no daemon is running — GetComponentsAsync returns null
+        var vm = CreateVm();
+        await vm.RefreshComponentsAsync();
+
+        Assert.All(vm.Components, c => Assert.Equal(ComponentState.Error, c.State));
     }
 }

@@ -68,6 +68,43 @@ public sealed class SesMcpManagerTests
     }
 
     [Fact]
+    public void ClaudeDesktopConfig_RemovesSesCloud_WhenPresent()
+    {
+        var tempPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.json");
+        try
+        {
+            // Arrange: config has ses-cloud entry
+            var config = new ClaudeDesktopConfig();
+            config.McpServers["ses-cloud"] = new McpServerEntry
+            {
+                Command = "npx",
+                Args    = ["-y", "@anthropic-ai/mcp-proxy", "https://mcp.tm.supereasysoftware.com/mcp"]
+            };
+            config.McpServers["ses-local"] = new McpServerEntry
+            {
+                Command = "/Users/test/.ses/ses-mcp",
+                Args    = ["--transport", "stdio", "--skip-update"]
+            };
+            config.Save(tempPath);
+
+            // Act: simulate the cleanup step
+            var loaded = ClaudeDesktopConfig.Load(tempPath);
+            var removed = loaded.McpServers.Remove("ses-cloud");
+            loaded.Save(tempPath);
+
+            // Assert: ses-cloud gone, ses-local preserved
+            Assert.True(removed);
+            var reloaded = ClaudeDesktopConfig.Load(tempPath);
+            Assert.False(reloaded.McpServers.ContainsKey("ses-cloud"));
+            Assert.True(reloaded.McpServers.ContainsKey("ses-local"));
+        }
+        finally
+        {
+            File.Delete(tempPath);
+        }
+    }
+
+    [Fact]
     public void ClaudeDesktopConfig_RoundTrip_PreservesData()
     {
         var tempPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.json");

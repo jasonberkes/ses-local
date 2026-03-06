@@ -176,6 +176,26 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
 
+            <TextBlock Text="COMPONENTS" Classes="sectionHeader"/>
+            <ItemsControl ItemsSource="{Binding Components}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Classes="featureRow">
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <Ellipse Classes="statusDot" VerticalAlignment="Center"
+                               Fill="{Binding Dot, Converter={StaticResource DotColorConverter}}"/>
+                      <StackPanel Grid.Column="1" Orientation="Vertical">
+                        <TextBlock Text="{Binding Name}" FontSize="13" Foreground="White"/>
+                        <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#888888"/>
+                      </StackPanel>
+                      <TextBlock Grid.Column="2" Text="{Binding Version}" FontSize="11"
+                                 Foreground="#555555" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
           </StackPanel>
 
           <!-- CC Config tab -->
