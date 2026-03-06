@@ -118,6 +118,13 @@ public partial class TrayApp : Application
                 _signInItem!.IsVisible  = false;
                 _licenseItem!.IsVisible = false;
             }
+            else if (state.LoginTimedOut)
+            {
+                _statusItem.Header      = "⚠ Login timed out — click to retry";
+                _signInItem!.Header     = "Sign In Again...";
+                _signInItem!.IsVisible  = true;
+                _licenseItem!.IsVisible = true;
+            }
             else if (state.NeedsReauth)
             {
                 _statusItem.Header      = "⚠ Session expired";

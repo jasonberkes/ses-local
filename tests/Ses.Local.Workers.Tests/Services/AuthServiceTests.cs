@@ -118,19 +118,7 @@ public sealed class AuthServiceTests
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static string CreateFakeJwt(DateTime expiry)
-    {
-        var header  = Base64UrlEncode("""{"alg":"HS256","typ":"JWT"}""");
-        var exp     = new DateTimeOffset(expiry).ToUnixTimeSeconds();
-        var payload = Base64UrlEncode($$$"""{"sub":"user-123","exp":{{{exp}}},"iat":1234567890}""");
-        return $"{header}.{payload}.fakesig";
-    }
-
-    private static string Base64UrlEncode(string input)
-    {
-        var bytes = System.Text.Encoding.UTF8.GetBytes(input);
-        return Convert.ToBase64String(bytes).Replace("+", "-").Replace("/", "_").TrimEnd('=');
-    }
+    private static string CreateFakeJwt(DateTime expiry) => TestJwtHelper.CreateFakeJwt(expiry);
 
     private sealed class MockHttpMessageHandler(RefreshResponse? response) : HttpMessageHandler
     {

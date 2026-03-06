@@ -14,6 +14,9 @@ public sealed class SesAuthState
     /// <summary>License status string (e.g. "Valid", "NoLicense", "Expired").</summary>
     public string? LicenseStatus { get; init; }
 
+    /// <summary>True if TriggerReauthAsync opened the browser but no auth arrived within 5 minutes.</summary>
+    public bool LoginTimedOut { get; init; }
+
     /// <summary>True if the user can use ses-local (either authenticated or has valid license).</summary>
     public bool CanUse => IsAuthenticated || LicenseValid;
 

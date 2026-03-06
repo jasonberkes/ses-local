@@ -61,7 +61,6 @@ internal static class Program
                     .AddConsoleExporter());
         }
 
-        builder.Services.AddSingleton<UriSchemeHandler>();
         builder.Services.AddHostedService<LevelDbWatcher>();
         builder.Services.AddHostedService<ClaudeCodeWatcher>();
         builder.Services.AddHostedService<CoworkWatcher>();
@@ -86,6 +85,7 @@ internal static class Program
             {
                 authenticated    = state.IsAuthenticated,
                 needsReauth      = state.NeedsReauth,
+                loginTimedOut    = state.LoginTimedOut,
                 licenseValid     = licState.IsValid,
                 licenseStatus    = licState.Status.ToString(),
                 uptime           = uptime.ToString(@"d\.hh\:mm\:ss")
