@@ -6,6 +6,7 @@ using Avalonia.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
+using Ses.Local.Core.Models;
 using Ses.Local.Core.Options;
 using Ses.Local.Tray.Converters;
 using Ses.Local.Tray.Services;
@@ -17,7 +18,7 @@ namespace Ses.Local.Tray;
 
 public partial class TrayApp : Application
 {
-    private MainWindow?         _mainWindow;
+    private DropdownPanel?      _dropdownPanel;
     private LicenseWindow?      _licenseWindow;
     private IServiceProvider?   _services;
     private NativeMenuItem?     _statusItem;
@@ -64,10 +65,6 @@ public partial class TrayApp : Application
             _licenseItem.Click += OnLicenseKeyClicked;
             _licenseItem.IsVisible = false;
             menu.Items.Add(_licenseItem);
-
-            var openItem = new NativeMenuItem("Open ses-local");
-            openItem.Click += (_, _) => ShowWindow();
-            menu.Items.Add(openItem);
 
             _importItem = new NativeMenuItem("Import Conversations...");
             _importItem.Click += OnImportConversationsClicked;
@@ -154,31 +151,32 @@ public partial class TrayApp : Application
         }
 
         // Daemon is Running (or supervisor unknown) — check auth state
+        SesAuthState? authState = null;
         try
         {
-            var auth  = _services.GetRequiredService<IAuthService>();
-            var state = await auth.GetStateAsync(ct);
+            var auth = _services.GetRequiredService<IAuthService>();
+            authState = await auth.GetStateAsync(ct);
 
-            if (state.IsAuthenticated)
+            if (authState.IsAuthenticated)
             {
                 _statusItem.Header      = "● Connected";
                 _signInItem!.IsVisible  = false;
                 _licenseItem!.IsVisible = false;
             }
-            else if (state.LicenseValid)
+            else if (authState.LicenseValid)
             {
                 _statusItem.Header      = "● Licensed (Tier 1)";
                 _signInItem!.IsVisible  = false;
                 _licenseItem!.IsVisible = false;
             }
-            else if (state.LoginTimedOut)
+            else if (authState.LoginTimedOut)
             {
                 _statusItem.Header      = "⚠ Login timed out — click to retry";
                 _signInItem!.Header     = "Sign In Again...";
                 _signInItem!.IsVisible  = true;
                 _licenseItem!.IsVisible = true;
             }
-            else if (state.NeedsReauth)
+            else if (authState.NeedsReauth)
             {
                 _statusItem.Header      = "⚠ Session expired";
                 _signInItem!.Header     = "Sign In Again...";
@@ -203,6 +201,10 @@ public partial class TrayApp : Application
             _signInItem!.IsVisible  = false;
             _licenseItem!.IsVisible = false;
         }
+
+        // Forward pre-fetched state to panel — avoids a second daemon round-trip
+        if (authState is not null && _dropdownPanel is { IsVisible: true } panel)
+            panel.RefreshStatus(authState);
     }
 
     // ── daemon control menu item ──────────────────────────────────────────────
@@ -413,26 +415,32 @@ public partial class TrayApp : Application
         }
     }
 
-    // ── main window ───────────────────────────────────────────────────────────
+    // ── dropdown panel ────────────────────────────────────────────────────────
 
-    private void OnTrayIconClicked(object? sender, EventArgs e) => ShowWindow();
-
-    private void ShowWindow()
+    private void OnTrayIconClicked(object? sender, EventArgs e)
     {
-        if (_mainWindow is null || !_mainWindow.IsVisible)
-        {
-            var auth = _services?.GetRequiredService<IAuthService>();
-            if (auth is null) return;
-            var opts = _services!.GetRequiredService<IOptions<SesLocalOptions>>();
-            var vm = new MainWindowViewModel(auth, opts);
-            _mainWindow = new MainWindow(vm);
-            _mainWindow.Closed += (_, _) => _mainWindow = null;
-            _mainWindow.Show();
-        }
+        if (_dropdownPanel is { IsVisible: true })
+            _dropdownPanel.Hide();
         else
+            ShowDropdownPanel();
+    }
+
+    private void ShowDropdownPanel()
+    {
+        if (_services is null) return;
+
+        var auth = _services.GetRequiredService<IAuthService>();
+        var opts = _services.GetRequiredService<IOptions<SesLocalOptions>>();
+
+        if (_dropdownPanel is null)
         {
-            _mainWindow.Activate();
+            var vm = new DropdownPanelViewModel(auth, opts);
+            _dropdownPanel = new DropdownPanel(vm);
+            _dropdownPanel.Closed += (_, _) => _dropdownPanel = null;
         }
+
+        _dropdownPanel.Show();
+        _dropdownPanel.Activate();
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
