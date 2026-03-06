@@ -125,6 +125,7 @@ public static class DependencyInjection
         {
             options.Retry.MaxRetryAttempts = 3;
             options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
+            options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(120);
             options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
         });
 
@@ -134,6 +135,7 @@ public static class DependencyInjection
         {
             options.Retry.MaxRetryAttempts = 3;
             options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
+            options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(120);
             options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
         });
 
@@ -142,6 +144,7 @@ public static class DependencyInjection
         {
             options.Retry.MaxRetryAttempts = 3;
             options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(60);
+            options.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(120);
             options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
         });
 
@@ -174,6 +177,7 @@ public static class DependencyInjection
         {
             options.Retry.MaxRetryAttempts = 3;
             options.AttemptTimeout.Timeout = TimeSpan.FromMinutes(3);
+            options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(6);
             options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(10);
         });
         services.AddSingleton<IModelDownloadService>(sp =>
