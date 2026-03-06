@@ -25,7 +25,10 @@ public partial class TrayApp : Application
     private NativeMenuItem?     _licenseItem;
     private NativeMenuItem?     _importItem;
     private NativeMenuItem?     _mcpItem;
+    private NativeMenuItem?     _daemonControlItem;
     private DispatcherTimer?    _statusTimer;
+    private DaemonSupervisor?   _supervisor;
+    private IClassicDesktopStyleApplicationLifetime? _desktop;
 
     public static readonly DotColorConverter DotColorConverterInstance = new();
 
@@ -35,7 +38,10 @@ public partial class TrayApp : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            _desktop = desktop;
             desktop.MainWindow = null;
+            // Prevent window-close from triggering app exit (tray-only mode)
+            desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             var trayIcon = new TrayIcon
             {
@@ -73,12 +79,12 @@ public partial class TrayApp : Application
 
             menu.Items.Add(new NativeMenuItemSeparator());
 
-            var stopDaemonItem = new NativeMenuItem("Stop Daemon");
-            stopDaemonItem.Click += OnStopDaemonClicked;
-            menu.Items.Add(stopDaemonItem);
+            _daemonControlItem = new NativeMenuItem("Stop Daemon");
+            _daemonControlItem.Click += OnDaemonControlClicked;
+            menu.Items.Add(_daemonControlItem);
 
             var quitItem = new NativeMenuItem("Quit Tray");
-            quitItem.Click += (_, _) => desktop.Shutdown();
+            quitItem.Click += OnQuitClicked;
             menu.Items.Add(quitItem);
 
             trayIcon.Menu = menu;
@@ -95,12 +101,59 @@ public partial class TrayApp : Application
     public void SetServiceProvider(IServiceProvider services)
     {
         _services = services;
+
+        // Wire DaemonSupervisor — subscribe to status changes and start supervision
+        _supervisor = services.GetRequiredService<DaemonSupervisor>();
+        _supervisor.StatusChanged += status =>
+            Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                UpdateDaemonMenuItem(status);
+                _ = UpdateStatusAsync();
+            });
+
+        _supervisor.Start();
+
         Dispatcher.UIThread.InvokeAsync(() => UpdateStatusAsync());
     }
+
+    // ── status update ─────────────────────────────────────────────────────────
 
     private async Task UpdateStatusAsync(CancellationToken ct = default)
     {
         if (_statusItem is null || _services is null) return;
+
+        // Supervisor process state takes priority over auth state
+        if (_supervisor is not null)
+        {
+            switch (_supervisor.Status)
+            {
+                case DaemonStatus.Starting:
+                    _statusItem.Header      = "↻ Starting daemon...";
+                    _signInItem!.IsVisible  = false;
+                    _licenseItem!.IsVisible = false;
+                    return;
+
+                case DaemonStatus.Restarting:
+                    _statusItem.Header      = $"↻ Restarting daemon (attempt {_supervisor.RetryAttempt}/{DaemonSupervisor.MaxRetries})...";
+                    _signInItem!.IsVisible  = false;
+                    _licenseItem!.IsVisible = false;
+                    return;
+
+                case DaemonStatus.Crashed:
+                    _statusItem.Header      = "✕ Daemon crashed — click Restart";
+                    _signInItem!.IsVisible  = false;
+                    _licenseItem!.IsVisible = false;
+                    return;
+
+                case DaemonStatus.Stopped:
+                    _statusItem.Header      = "■ Daemon stopped";
+                    _signInItem!.IsVisible  = false;
+                    _licenseItem!.IsVisible = false;
+                    return;
+            }
+        }
+
+        // Daemon is Running (or supervisor unknown) — check auth state
         try
         {
             var auth  = _services.GetRequiredService<IAuthService>();
@@ -152,6 +205,53 @@ public partial class TrayApp : Application
         }
     }
 
+    // ── daemon control menu item ──────────────────────────────────────────────
+
+    private void UpdateDaemonMenuItem(DaemonStatus status)
+    {
+        if (_daemonControlItem is null) return;
+
+        (_daemonControlItem.Header, _daemonControlItem.IsEnabled) = status switch
+        {
+            DaemonStatus.Running    => ("Stop Daemon", true),
+            DaemonStatus.Crashed    => ("Restart Daemon", true),
+            DaemonStatus.Stopped    => ("Start Daemon", true),
+            DaemonStatus.Starting   => ("Starting Daemon...", false),
+            DaemonStatus.Restarting => ($"↻ Restarting ({_supervisor!.RetryAttempt}/{DaemonSupervisor.MaxRetries})...", false),
+            _                       => ("Stop Daemon", true),
+        };
+    }
+
+    private async void OnDaemonControlClicked(object? sender, EventArgs e)
+    {
+        if (_supervisor is null) return;
+
+        switch (_supervisor.Status)
+        {
+            case DaemonStatus.Running:
+            case DaemonStatus.Starting:
+                await _supervisor.StopAsync();
+                break;
+
+            case DaemonStatus.Crashed:
+            case DaemonStatus.Stopped:
+                await _supervisor.RestartAsync();
+                break;
+        }
+    }
+
+    // ── quit ─────────────────────────────────────────────────────────────────
+
+    private async void OnQuitClicked(object? sender, EventArgs e)
+    {
+        if (_supervisor is not null)
+            await _supervisor.StopAsync();
+
+        _desktop?.Shutdown();
+    }
+
+    // ── sign-in / license ─────────────────────────────────────────────────────
+
     private async void OnSignInClicked(object? sender, EventArgs e)
     {
         if (_services is null) return;
@@ -182,6 +282,8 @@ public partial class TrayApp : Application
         _licenseWindow.Show();
     }
 
+    // ── import conversations ──────────────────────────────────────────────────
+
     private async void OnImportConversationsClicked(object? sender, EventArgs e)
     {
         if (_services is null || _importItem is null) return;
@@ -194,11 +296,13 @@ public partial class TrayApp : Application
             // Avalonia 11 requires a TopLevel to access StorageProvider
             var owner = new Window
             {
-                ShowInTaskbar = false,
-                WindowState   = WindowState.Normal,
-                Width         = 1,
-                Height        = 1,
-                Opacity       = 0
+                ShowInTaskbar      = false,
+                ShowActivated      = false,
+                SystemDecorations  = SystemDecorations.None,
+                WindowState        = WindowState.Normal,
+                Width              = 1,
+                Height             = 1,
+                Opacity            = 0
             };
             owner.Show();
 
@@ -261,6 +365,8 @@ public partial class TrayApp : Application
         }
     }
 
+    // ── MCP ──────────────────────────────────────────────────────────────────
+
     private async void OnConfigureMcpClicked(object? sender, EventArgs e)
     {
         if (_services is null || _mcpItem is null) return;
@@ -307,12 +413,7 @@ public partial class TrayApp : Application
         }
     }
 
-    private async void OnStopDaemonClicked(object? sender, EventArgs e)
-    {
-        if (_services is null) return;
-        var proxy = _services.GetRequiredService<DaemonAuthProxy>();
-        await proxy.ShutdownAsync();
-    }
+    // ── main window ───────────────────────────────────────────────────────────
 
     private void OnTrayIconClicked(object? sender, EventArgs e) => ShowWindow();
 
@@ -333,6 +434,8 @@ public partial class TrayApp : Application
             _mainWindow.Activate();
         }
     }
+
+    // ── helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Returns a human-readable format label based on a quick peek at the file name/extension.

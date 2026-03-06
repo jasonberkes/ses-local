@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  launchd agent for ses-local daemon.
+  launchd agent for ses-local daemon (DEPRECATED).
+
+  DEPRECATED: As of WI-970, the daemon lifecycle is managed by the tray app via
+  DaemonSupervisor. The tray app (com.supereasysoftware.ses-local-tray.plist) starts
+  on login and supervises the daemon with crash recovery and exponential backoff.
+
+  This file is retained for users who installed the old direct-daemon approach.
+  New installations should use the tray plist instead. If both are installed,
+  the tray supervisor will detect the already-running daemon and monitor it.
 
   Install to ~/Library/LaunchAgents/com.supereasysoftware.ses-local.plist
   NOTE: launchd does NOT expand ~ in paths. The installer must replace
