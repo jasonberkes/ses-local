@@ -14,6 +14,9 @@ namespace Ses.Local.Tray.Services;
 /// </summary>
 public sealed class DaemonAuthProxy : IAuthService, IDisposable
 {
+    private static readonly System.Text.Json.JsonSerializerOptions _jsonOptions =
+        new() { PropertyNameCaseInsensitive = true };
+
     private readonly HttpClient _http;
     private readonly HttpClient _longRunHttp; // separate client for long-running operations (e.g. bulk import)
     private readonly string _loginUrl;
@@ -138,11 +141,11 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         => Task.FromResult<string?>(null); // Tray doesn't need PATs
 
     /// <summary>
-    /// Sends a Claude.ai export file to the daemon for import into local.db.
-    /// Returns null if the daemon is unreachable.
+    /// Triggers a background import on the daemon and returns immediately (202 Accepted).
+    /// The daemon runs the import and records progress; poll <see cref="GetImportStatusAsync"/> for updates.
+    /// Returns false if the daemon is unreachable or an import is already running.
     /// </summary>
-    public async Task<ImportConversationsResult?> ImportConversationsAsync(
-        string filePath, CancellationToken ct = default)
+    public async Task<bool> StartImportAsync(string filePath, CancellationToken ct = default)
     {
         try
         {
@@ -151,16 +154,35 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
                 new { filePath },
                 ct);
 
-            if (!response.IsSuccessStatusCode) return null;
+            return response.StatusCode == System.Net.HttpStatusCode.Accepted;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
-            return await response.Content.ReadFromJsonAsync<ImportConversationsResult>(
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true },
+    /// <summary>Returns the current import progress, or null if the daemon is unreachable.</summary>
+    public async Task<ImportStatusResponse?> GetImportStatusAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<ImportStatusResponse>(
+                "/api/conversations/import/status",
+                _jsonOptions,
                 ct);
         }
-        catch (Exception)
+        catch
         {
             return null;
         }
+    }
+
+    /// <summary>Requests the daemon to cancel any in-progress import.</summary>
+    public async Task CancelImportAsync(CancellationToken ct = default)
+    {
+        try { await _http.PostAsync("/api/conversations/import/cancel", null, ct); }
+        catch { /* daemon unreachable */ }
     }
 
     public void Dispose()
@@ -180,11 +202,15 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
     }
 }
 
-/// <summary>Result DTO returned by the daemon's /api/conversations/import endpoint.</summary>
-public sealed class ImportConversationsResult
+/// <summary>Progress/result DTO returned by GET /api/conversations/import/status.</summary>
+public sealed class ImportStatusResponse
 {
-    public int SessionsImported { get; set; }
-    public int MessagesImported { get; set; }
-    public int Duplicates       { get; set; }
-    public int Errors           { get; set; }
+    public bool    IsRunning        { get; set; }
+    public int     SessionsImported { get; set; }
+    public int     MessagesImported { get; set; }
+    public int     Duplicates       { get; set; }
+    public int     Errors           { get; set; }
+    public string  Format           { get; set; } = string.Empty;
+    public bool    WasCancelled     { get; set; }
+    public string? FailureMessage   { get; set; }
 }

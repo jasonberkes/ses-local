@@ -286,85 +286,10 @@ public partial class TrayApp : Application
 
     // ── import conversations ──────────────────────────────────────────────────
 
-    private async void OnImportConversationsClicked(object? sender, EventArgs e)
+    private void OnImportConversationsClicked(object? sender, EventArgs e)
     {
-        if (_services is null || _importItem is null) return;
-
-        var proxy = _services.GetRequiredService<DaemonAuthProxy>();
-
-        // Show file picker on the UI thread via a temporary host window
-        var filePath = await Dispatcher.UIThread.InvokeAsync(async () =>
-        {
-            // Avalonia 11 requires a TopLevel to access StorageProvider
-            var owner = new Window
-            {
-                ShowInTaskbar      = false,
-                ShowActivated      = false,
-                SystemDecorations  = SystemDecorations.None,
-                WindowState        = WindowState.Normal,
-                Width              = 1,
-                Height             = 1,
-                Opacity            = 0
-            };
-            owner.Show();
-
-            var topLevel = TopLevel.GetTopLevel(owner);
-            if (topLevel is null) { owner.Close(); return null; }
-
-            var files = await topLevel.StorageProvider.OpenFilePickerAsync(
-                new Avalonia.Platform.Storage.FilePickerOpenOptions
-                {
-                    Title         = "Select AI Conversation Export",
-                    AllowMultiple = false,
-                    FileTypeFilter =
-                    [
-                        new Avalonia.Platform.Storage.FilePickerFileType("Conversation export files")
-                        {
-                            Patterns = ["*.json", "*.zip"]
-                        },
-                        new Avalonia.Platform.Storage.FilePickerFileType("JSON files")
-                        {
-                            Patterns = ["*.json"]
-                        },
-                        new Avalonia.Platform.Storage.FilePickerFileType("ZIP archives")
-                        {
-                            Patterns = ["*.zip"]
-                        }
-                    ]
-                });
-
-            owner.Close();
-            return files.Count > 0 ? files[0].Path.LocalPath : null;
-        });
-
-        if (filePath is null) return;
-
-        // Show format-aware progress label
-        var formatLabel = GuessFormatLabel(filePath);
-        _importItem.Header    = $"Importing {formatLabel} conversations...";
-        _importItem.IsEnabled = false;
-
-        try
-        {
-            var result = await proxy.ImportConversationsAsync(filePath);
-
-            _importItem.Header = result is not null
-                ? $"✓ Imported {result.SessionsImported} conversations"
-                : "✕ Import failed (daemon unavailable)";
-
-            // Reset header after a few seconds
-            _ = Task.Delay(TimeSpan.FromSeconds(6)).ContinueWith(_ =>
-                Dispatcher.UIThread.InvokeAsync(() =>
-                {
-                    _importItem.Header    = "Import Conversations...";
-                    _importItem.IsEnabled = true;
-                }));
-        }
-        catch (Exception)
-        {
-            _importItem.Header    = "Import Conversations...";
-            _importItem.IsEnabled = true;
-        }
+        // Open the dropdown panel on the Import tab
+        ShowDropdownPanel(switchToImport: true);
     }
 
     // ── MCP ──────────────────────────────────────────────────────────────────
@@ -425,51 +350,30 @@ public partial class TrayApp : Application
             ShowDropdownPanel();
     }
 
-    private void ShowDropdownPanel()
+    private void ShowDropdownPanel(bool switchToImport = false)
     {
         if (_services is null) return;
 
-        var auth = _services.GetRequiredService<IAuthService>();
-        var opts = _services.GetRequiredService<IOptions<SesLocalOptions>>();
+        var auth  = _services.GetRequiredService<IAuthService>();
+        var opts  = _services.GetRequiredService<IOptions<SesLocalOptions>>();
+        var proxy = _services.GetRequiredService<DaemonAuthProxy>();
 
         if (_dropdownPanel is null)
         {
-            var vm = new DropdownPanelViewModel(auth, opts);
+            var wizard = new ImportWizardViewModel(proxy);
+            var vm = new DropdownPanelViewModel(auth, opts, wizard);
             _dropdownPanel = new DropdownPanel(vm);
             _dropdownPanel.Closed += (_, _) => _dropdownPanel = null;
         }
+
+        if (switchToImport)
+            (_dropdownPanel.DataContext as DropdownPanelViewModel)?.SelectTab(PanelTab.Import);
 
         _dropdownPanel.Show();
         _dropdownPanel.Activate();
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Returns a human-readable format label based on a quick peek at the file name/extension.
-    /// Used for the "Importing {format} conversations..." progress label only — the daemon
-    /// performs authoritative content-based detection.
-    /// </summary>
-    private static string GuessFormatLabel(string filePath)
-    {
-        var ext = Path.GetExtension(filePath).ToLowerInvariant();
-        if (ext == ".zip")
-        {
-            try
-            {
-                using var zip = System.IO.Compression.ZipFile.OpenRead(filePath);
-                if (zip.Entries.Any(e =>
-                        string.Equals(e.Name, "conversations.json", StringComparison.OrdinalIgnoreCase)))
-                    return "ChatGPT";
-                if (zip.Entries.Any(e =>
-                        string.Equals(e.Name, "My Activity.json", StringComparison.OrdinalIgnoreCase)))
-                    return "Gemini";
-            }
-            catch { /* ignore — daemon will report real format */ }
-            return "AI";
-        }
-        return "Claude";
-    }
 
     private static WindowIcon? TryGetTrayIcon()
     {

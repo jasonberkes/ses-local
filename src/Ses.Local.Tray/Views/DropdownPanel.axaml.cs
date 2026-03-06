@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform.Storage;
 using Ses.Local.Core.Models;
 using Ses.Local.Tray.ViewModels;
 
@@ -18,6 +19,11 @@ public partial class DropdownPanel : Window
     {
         _vm = vm;
         DataContext = vm;
+
+        // Wire the file picker into the wizard ViewModel
+        if (vm.ImportWizard is { } wizard)
+            wizard.FilePicker = PickImportFileAsync;
+
         Deactivated += (_, _) => Hide();
         PositionBelowMenuBar();
     }
@@ -74,5 +80,54 @@ public partial class DropdownPanel : Window
     private async void OnSignOutClick(object? sender, RoutedEventArgs e)
     {
         if (_vm is not null) await _vm.SignOutAsync();
+    }
+
+    // ── import wizard ────────────────────────────────────────────────────────
+
+    private void OnImportSourceClaudeClick(object? sender, RoutedEventArgs e)  => _vm?.ImportWizard?.SelectSource(ImportSource.Claude);
+    private void OnImportSourceChatGptClick(object? sender, RoutedEventArgs e) => _vm?.ImportWizard?.SelectSource(ImportSource.ChatGPT);
+    private void OnImportSourceGeminiClick(object? sender, RoutedEventArgs e)  => _vm?.ImportWizard?.SelectSource(ImportSource.Gemini);
+    private void OnImportBackClick(object? sender, RoutedEventArgs e)          => _vm?.ImportWizard?.Reset();
+
+    private async void OnPickFileClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm?.ImportWizard is { } wizard)
+            await wizard.PickFileAsync();
+    }
+
+    private async void OnStartImportClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm?.ImportWizard is { } wizard)
+            await wizard.StartImportAsync();
+    }
+
+    private async void OnCancelImportClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm?.ImportWizard is { } wizard)
+            await wizard.CancelAsync();
+    }
+
+    private void OnImportMoreClick(object? sender, RoutedEventArgs e) => _vm?.ImportWizard?.ImportMore();
+    private void OnImportDoneClick(object? sender, RoutedEventArgs e) => _vm?.ImportWizard?.Reset();
+
+    private async Task<string?> PickImportFileAsync(string[] extensions)
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null) return null;
+
+        var filter = new FilePickerFileType("Export files")
+        {
+            Patterns = extensions
+        };
+
+        var files = await topLevel.StorageProvider.OpenFilePickerAsync(
+            new FilePickerOpenOptions
+            {
+                Title         = "Select AI Conversation Export",
+                AllowMultiple = false,
+                FileTypeFilter = [filter]
+            });
+
+        return files.Count > 0 ? files[0].Path.LocalPath : null;
     }
 }

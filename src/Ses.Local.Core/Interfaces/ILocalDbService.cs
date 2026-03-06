@@ -187,4 +187,16 @@ public interface ILocalDbService
     /// Inserts or replaces a sync_metadata key/value pair.
     /// </summary>
     Task SetSyncMetadataAsync(string key, string value, CancellationToken ct = default);
+
+    // ── Import History (TRAY-5) ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Appends a record of a completed import operation to the import_history table.
+    /// </summary>
+    Task RecordImportHistoryAsync(ImportHistoryRecord record, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns the most recent import history record, or null if no imports have been recorded.
+    /// </summary>
+    Task<ImportHistoryRecord?> GetLastImportAsync(CancellationToken ct = default);
 }

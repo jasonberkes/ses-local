@@ -73,11 +73,14 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged
 
     public string AppVersion => _appVersion;
 
-    public DropdownPanelViewModel(IAuthService auth, IOptions<SesLocalOptions> options)
+    public ImportWizardViewModel? ImportWizard { get; }
+
+    public DropdownPanelViewModel(IAuthService auth, IOptions<SesLocalOptions> options, ImportWizardViewModel? importWizard = null)
     {
         _auth = auth;
         _troubleshootUrl = options.Value.DocsBaseUrl.TrimEnd('/') + "/ses-local/troubleshoot";
         _appVersion = GetAppVersion();
+        ImportWizard = importWizard;
         InitFeatures();
         _ = LoadAsync();
     }

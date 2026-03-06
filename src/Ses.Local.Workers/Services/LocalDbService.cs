@@ -536,6 +536,12 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             await ApplyMigration9Async(conn, ct);
             await SetUserVersionAsync(conn, 9, ct);
         }
+
+        if (version < 10)
+        {
+            await ApplyMigration10Async(conn, ct);
+            await SetUserVersionAsync(conn, 10, ct);
+        }
     }
 
     private static async Task ApplyMigration1Async(SqliteConnection conn, CancellationToken ct)
@@ -834,6 +840,23 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
                 key        TEXT PRIMARY KEY,
                 value      TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )
+            """, ct);
+    }
+
+    private static async Task ApplyMigration10Async(SqliteConnection conn, CancellationToken ct)
+    {
+        // import_history — record of each completed import operation (TRAY-5)
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE IF NOT EXISTS import_history (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                source              TEXT NOT NULL,
+                file_path           TEXT NOT NULL,
+                imported_at         TEXT NOT NULL,
+                sessions_imported   INTEGER NOT NULL DEFAULT 0,
+                messages_imported   INTEGER NOT NULL DEFAULT 0,
+                duplicates_skipped  INTEGER NOT NULL DEFAULT 0,
+                errors              INTEGER NOT NULL DEFAULT 0
             )
             """, ct);
     }
@@ -1488,6 +1511,54 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         Confidence           = r.GetDouble(4),
         CreatedAt            = DateTime.Parse(r.GetString(5))
     };
+
+    // ── Import History (TRAY-5) ──────────────────────────────────────────────
+
+    public async Task RecordImportHistoryAsync(ImportHistoryRecord record, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO import_history
+                (source, file_path, imported_at, sessions_imported, messages_imported, duplicates_skipped, errors)
+            VALUES
+                (@source, @file_path, @imported_at, @sessions_imported, @messages_imported, @duplicates_skipped, @errors)
+            """;
+        cmd.Parameters.AddWithValue("@source",             record.Source);
+        cmd.Parameters.AddWithValue("@file_path",          record.FilePath);
+        cmd.Parameters.AddWithValue("@imported_at",        record.ImportedAt.ToString("O"));
+        cmd.Parameters.AddWithValue("@sessions_imported",  record.SessionsImported);
+        cmd.Parameters.AddWithValue("@messages_imported",  record.MessagesImported);
+        cmd.Parameters.AddWithValue("@duplicates_skipped", record.DuplicatesSkipped);
+        cmd.Parameters.AddWithValue("@errors",             record.Errors);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<ImportHistoryRecord?> GetLastImportAsync(CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, source, file_path, imported_at,
+                   sessions_imported, messages_imported, duplicates_skipped, errors
+            FROM import_history
+            ORDER BY imported_at DESC
+            LIMIT 1
+            """;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+        return new ImportHistoryRecord
+        {
+            Id                = reader.GetInt64(0),
+            Source            = reader.GetString(1),
+            FilePath          = reader.GetString(2),
+            ImportedAt        = DateTime.Parse(reader.GetString(3)),
+            SessionsImported  = reader.GetInt32(4),
+            MessagesImported  = reader.GetInt32(5),
+            DuplicatesSkipped = reader.GetInt32(6),
+            Errors            = reader.GetInt32(7),
+        };
+    }
 
     // ── Sync Metadata (WI-991) ───────────────────────────────────────────────
 

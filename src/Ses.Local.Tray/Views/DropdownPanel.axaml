@@ -187,12 +187,139 @@
           </StackPanel>
 
           <!-- Import tab -->
-          <StackPanel IsVisible="{Binding IsImportTab}" Margin="16,24">
-            <TextBlock Text="Conversation import"
-                       FontSize="14" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
-            <TextBlock Text="Coming in TRAY-5"
-                       FontSize="13" Foreground="#888888" TextWrapping="Wrap"/>
-          </StackPanel>
+          <Panel IsVisible="{Binding IsImportTab}" DataContext="{Binding ImportWizard}">
+
+            <!-- Step 1: Choose Source -->
+            <StackPanel IsVisible="{Binding IsSourceStep}" Margin="16,16" Spacing="12">
+              <TextBlock Text="Import Conversation History"
+                         FontSize="14" FontWeight="SemiBold" Foreground="White"/>
+              <TextBlock Text="{Binding LastImportInfo}" FontSize="11" Foreground="#888888"
+                         IsVisible="{Binding LastImportInfo, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+              <WrapPanel HorizontalAlignment="Left" ItemSpacing="10">
+                <Button Width="110" Height="60" Background="#FF3A3A3C" CornerRadius="6"
+                        BorderThickness="1" BorderBrush="#FF555555"
+                        Click="OnImportSourceClaudeClick">
+                  <StackPanel Spacing="4" HorizontalAlignment="Center">
+                    <TextBlock Text="Claude" Foreground="White" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                    <TextBlock Text=".json" Foreground="#888888" FontSize="11" HorizontalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Width="110" Height="60" Background="#FF3A3A3C" CornerRadius="6"
+                        BorderThickness="1" BorderBrush="#FF555555"
+                        Click="OnImportSourceChatGptClick">
+                  <StackPanel Spacing="4" HorizontalAlignment="Center">
+                    <TextBlock Text="ChatGPT" Foreground="White" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                    <TextBlock Text=".zip" Foreground="#888888" FontSize="11" HorizontalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+                <Button Width="110" Height="60" Background="#FF3A3A3C" CornerRadius="6"
+                        BorderThickness="1" BorderBrush="#FF555555"
+                        Click="OnImportSourceGeminiClick">
+                  <StackPanel Spacing="4" HorizontalAlignment="Center">
+                    <TextBlock Text="Gemini" Foreground="White" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                    <TextBlock Text=".zip" Foreground="#888888" FontSize="11" HorizontalAlignment="Center"/>
+                  </StackPanel>
+                </Button>
+              </WrapPanel>
+              <TextBlock Text="Select the AI platform to import conversations from."
+                         FontSize="12" Foreground="#888888" TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <!-- Step 2: Instructions + File Picker -->
+            <StackPanel IsVisible="{Binding IsInstructionsStep}" Margin="16,16" Spacing="10">
+              <Grid ColumnDefinitions="Auto,*">
+                <Button Content="←" Background="Transparent" Foreground="#888888"
+                        BorderThickness="0" FontSize="14" Padding="0,0,8,0"
+                        Click="OnImportBackClick"/>
+                <TextBlock Grid.Column="1" Text="{Binding SourceLabel, StringFormat='Import from {0}'}"
+                           FontSize="14" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+              </Grid>
+              <TextBlock Text="{Binding InstructionsText}" FontSize="12" Foreground="#888888"
+                         TextWrapping="Wrap" LineHeight="18"/>
+              <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                <Button Content="Select File..." Background="#FF3A3A3C" Foreground="White"
+                        BorderThickness="0" CornerRadius="4" Padding="10,6"
+                        Click="OnPickFileClick"/>
+                <TextBlock Text="{Binding FileName}" Foreground="#AAAAAA" FontSize="12"
+                           VerticalAlignment="Center"
+                           IsVisible="{Binding FileName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+              </StackPanel>
+              <Button Content="Import →" Background="#FF0A84FF" Foreground="White"
+                      BorderThickness="0" CornerRadius="4" Padding="12,6"
+                      IsEnabled="{Binding FileName, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                      Click="OnStartImportClick"/>
+            </StackPanel>
+
+            <!-- Step 3: Progress -->
+            <StackPanel IsVisible="{Binding IsProgressStep}" Margin="16,16" Spacing="10">
+              <TextBlock Text="{Binding ProgressStatus}" FontSize="13" FontWeight="SemiBold"
+                         Foreground="White" TextWrapping="Wrap"/>
+              <ProgressBar IsIndeterminate="True" Height="6" CornerRadius="3"
+                           Foreground="#FF0A84FF" Background="#FF3A3A3C"/>
+              <StackPanel Spacing="4">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Sessions imported:" Foreground="#888888" FontSize="12"/>
+                  <TextBlock Grid.Column="1" Text="{Binding ProgressSessions, StringFormat='{}{0:N0}'}"
+                             Foreground="White" FontSize="12"/>
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Messages:" Foreground="#888888" FontSize="12"/>
+                  <TextBlock Grid.Column="1" Text="{Binding ProgressMessages, StringFormat='{}{0:N0}'}"
+                             Foreground="White" FontSize="12"/>
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Duplicates skipped:" Foreground="#888888" FontSize="12"/>
+                  <TextBlock Grid.Column="1" Text="{Binding ProgressDuplicates, StringFormat='{}{0:N0}'}"
+                             Foreground="White" FontSize="12"/>
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Errors:" Foreground="#888888" FontSize="12"/>
+                  <TextBlock Grid.Column="1" Text="{Binding ProgressErrors, StringFormat='{}{0:N0}'}"
+                             Foreground="White" FontSize="12"/>
+                </Grid>
+              </StackPanel>
+              <Button Content="Cancel" Background="#FF3A3A3C" Foreground="#888888"
+                      BorderThickness="0" CornerRadius="4" Padding="10,6"
+                      Click="OnCancelImportClick"/>
+            </StackPanel>
+
+            <!-- Step 4: Complete -->
+            <StackPanel IsVisible="{Binding IsCompleteStep}" Margin="16,16" Spacing="10">
+              <TextBlock Text="✓ Import Complete!" FontSize="16" FontWeight="Bold"
+                         Foreground="#34C759"/>
+              <StackPanel Spacing="4">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Conversations imported:" Foreground="#888888" FontSize="12"/>
+                  <TextBlock Grid.Column="1" Text="{Binding ProgressSessions, StringFormat='{}{0:N0}'}"
+                             Foreground="White" FontSize="12"/>
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Messages:" Foreground="#888888" FontSize="12"/>
+                  <TextBlock Grid.Column="1" Text="{Binding ProgressMessages, StringFormat='{}{0:N0}'}"
+                             Foreground="White" FontSize="12"/>
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Duplicates skipped:" Foreground="#888888" FontSize="12"/>
+                  <TextBlock Grid.Column="1" Text="{Binding ProgressDuplicates, StringFormat='{}{0:N0}'}"
+                             Foreground="White" FontSize="12"/>
+                </Grid>
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Text="Errors:" Foreground="#888888" FontSize="12"/>
+                  <TextBlock Grid.Column="1" Text="{Binding ProgressErrors, StringFormat='{}{0:N0}'}"
+                             Foreground="White" FontSize="12"/>
+                </Grid>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="Import More" Background="#FF3A3A3C" Foreground="White"
+                        BorderThickness="0" CornerRadius="4" Padding="10,6"
+                        Click="OnImportMoreClick"/>
+                <Button Content="Done" Background="#FF0A84FF" Foreground="White"
+                        BorderThickness="0" CornerRadius="4" Padding="10,6"
+                        Click="OnImportDoneClick"/>
+              </StackPanel>
+            </StackPanel>
+
+          </Panel>
 
           <!-- Settings tab -->
           <StackPanel IsVisible="{Binding IsSettingsTab}" Margin="16,16" Spacing="12">

@@ -61,6 +61,7 @@ internal static class Program
                     .AddConsoleExporter());
         }
 
+        builder.Services.AddSingleton<ImportProgressTracker>();
         builder.Services.AddHostedService<LevelDbWatcher>();
         builder.Services.AddHostedService<ClaudeCodeWatcher>();
         builder.Services.AddHostedService<CoworkWatcher>();
@@ -126,7 +127,8 @@ internal static class Program
             });
         });
 
-        app.MapPost("/api/conversations/import", async (HttpContext ctx, ConversationImportDispatcher dispatcher) =>
+        // Start an import in the background. Returns 202 immediately; poll /status for progress.
+        app.MapPost("/api/conversations/import", async (HttpContext ctx, ConversationImportDispatcher dispatcher, ImportProgressTracker tracker, ILocalDbService db) =>
         {
             var body = await System.Text.Json.JsonSerializer.DeserializeAsync<ImportConversationsRequest>(
                 ctx.Request.Body,
@@ -138,17 +140,55 @@ internal static class Program
             if (!File.Exists(body.FilePath))
                 return Results.BadRequest(new { error = "File not found." });
 
-            var detectedFormat = ConversationImportDispatcher.DetectFormat(body.FilePath);
-            var result = await dispatcher.ImportAsync(body.FilePath, ct: ctx.RequestAborted);
+            if (tracker.IsRunning)
+                return Results.Conflict(new { error = "An import is already in progress." });
 
-            return Results.Ok(new
+            var format = ConversationImportDispatcher.DetectFormat(body.FilePath);
+            var formatLabel = ConversationImportDispatcher.FormatLabel(format);
+            tracker.Start(formatLabel);
+
+            var filePath = body.FilePath;
+            _ = Task.Run(async () =>
             {
-                sessionsImported = result.SessionsImported,
-                messagesImported = result.MessagesImported,
-                duplicates       = result.Duplicates,
-                errors           = result.Errors,
-                format           = ConversationImportDispatcher.FormatLabel(detectedFormat)
+                try
+                {
+                    var progress = new Progress<ImportProgress>(p =>
+                        tracker.UpdateProgress(p.Processed));
+
+                    var result = await dispatcher.ImportAsync(filePath, progress, tracker.CancellationToken);
+                    tracker.Complete(result);
+
+                    await db.RecordImportHistoryAsync(new ImportHistoryRecord
+                    {
+                        Source            = formatLabel.ToLowerInvariant(),
+                        FilePath          = filePath,
+                        ImportedAt        = DateTime.UtcNow,
+                        SessionsImported  = result.SessionsImported,
+                        MessagesImported  = result.MessagesImported,
+                        DuplicatesSkipped = result.Duplicates,
+                        Errors            = result.Errors,
+                    });
+                }
+                catch (OperationCanceledException)
+                {
+                    tracker.Cancel();
+                }
+                catch (Exception ex)
+                {
+                    tracker.Fail(ex.Message);
+                }
             });
+
+            return Results.Accepted("/api/conversations/import/status", new { format = formatLabel });
+        });
+
+        app.MapGet("/api/conversations/import/status", (ImportProgressTracker tracker) =>
+            Results.Ok(tracker.GetStatus()));
+
+        app.MapPost("/api/conversations/import/cancel", (ImportProgressTracker tracker) =>
+        {
+            tracker.RequestCancel();
+            return Results.Ok(new { message = "Cancel requested." });
         });
 
         app.MapPost("/api/signout", async (IAuthService auth) =>
@@ -241,4 +281,97 @@ internal sealed record LicenseActivateRequest
 internal sealed record ImportConversationsRequest
 {
     public string FilePath { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// Thread-safe singleton that tracks the state of an in-progress or recently completed import.
+/// The tray polls GET /api/conversations/import/status every 500 ms during import.
+/// </summary>
+internal sealed class ImportProgressTracker
+{
+    private readonly object              _lock = new();
+    private CancellationTokenSource      _cts  = new();
+
+    public bool   IsRunning          { get; private set; }
+    public int    SessionsImported   { get; private set; }
+    public int    MessagesImported   { get; private set; }
+    public int    Duplicates         { get; private set; }
+    public int    Errors             { get; private set; }
+    public string Format             { get; private set; } = string.Empty;
+    public string? FailureMessage    { get; private set; }
+    public bool   WasCancelled       { get; private set; }
+
+    public CancellationToken CancellationToken { get { lock (_lock) return _cts.Token; } }
+
+    public void Start(string format)
+    {
+        CancellationTokenSource old;
+        lock (_lock)
+        {
+            old              = _cts;
+            _cts             = new CancellationTokenSource();
+            IsRunning        = true;
+            SessionsImported = 0;
+            MessagesImported = 0;
+            Duplicates       = 0;
+            Errors           = 0;
+            Format           = format;
+            FailureMessage   = null;
+            WasCancelled     = false;
+        }
+        old.Dispose();
+    }
+
+    public void UpdateProgress(int sessionsProcessed)
+    {
+        lock (_lock) SessionsImported = sessionsProcessed;
+    }
+
+    public void Complete(Ses.Local.Workers.Services.ImportResult result)
+    {
+        lock (_lock)
+        {
+            IsRunning        = false;
+            SessionsImported = result.SessionsImported;
+            MessagesImported = result.MessagesImported;
+            Duplicates       = result.Duplicates;
+            Errors           = result.Errors;
+        }
+    }
+
+    public void Cancel()
+    {
+        lock (_lock)
+        {
+            IsRunning    = false;
+            WasCancelled = true;
+        }
+    }
+
+    public void Fail(string message)
+    {
+        lock (_lock)
+        {
+            IsRunning      = false;
+            FailureMessage = message;
+        }
+    }
+
+    public void RequestCancel() { lock (_lock) _cts.Cancel(); }
+
+    public object GetStatus()
+    {
+        lock (_lock)
+            return new
+            {
+                isRunning        = IsRunning,
+                sessionsImported = SessionsImported,
+                messagesImported = MessagesImported,
+                duplicates       = Duplicates,
+                errors           = Errors,
+                format           = Format,
+                wasCancelled     = WasCancelled,
+                failureMessage   = FailureMessage,
+            };
+    }
 }
