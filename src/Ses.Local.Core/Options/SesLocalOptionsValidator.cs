@@ -18,7 +18,6 @@ public sealed class SesLocalOptionsValidator : IValidateOptions<SesLocalOptions>
         ValidateUrl(options.ClaudeAiBaseUrl,      nameof(options.ClaudeAiBaseUrl),      errors);
         ValidateUrl(options.SesMcpManifestUrl,    nameof(options.SesMcpManifestUrl),    errors);
         ValidateUrl(options.SesLocalManifestUrl,  nameof(options.SesLocalManifestUrl),  errors);
-        ValidateUrl(options.CloudMcpUrl,          nameof(options.CloudMcpUrl),          errors);
         ValidateUrl(options.DocsBaseUrl,          nameof(options.DocsBaseUrl),          errors);
 
         return errors.Count > 0

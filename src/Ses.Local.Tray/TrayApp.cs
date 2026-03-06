@@ -429,12 +429,13 @@ public partial class TrayApp : Application
     {
         if (_services is null) return;
 
-        var auth = _services.GetRequiredService<IAuthService>();
-        var opts = _services.GetRequiredService<IOptions<SesLocalOptions>>();
+        var auth        = _services.GetRequiredService<IAuthService>();
+        var daemonProxy = _services.GetRequiredService<DaemonAuthProxy>();
+        var opts        = _services.GetRequiredService<IOptions<SesLocalOptions>>();
 
         if (_dropdownPanel is null)
         {
-            var vm = new DropdownPanelViewModel(auth, opts);
+            var vm = new DropdownPanelViewModel(auth, daemonProxy, opts);
             _dropdownPanel = new DropdownPanel(vm);
             _dropdownPanel.Closed += (_, _) => _dropdownPanel = null;
         }

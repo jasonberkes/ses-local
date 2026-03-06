@@ -14,6 +14,9 @@ namespace Ses.Local.Tray.Services;
 /// </summary>
 public sealed class DaemonAuthProxy : IAuthService, IDisposable
 {
+    private static readonly System.Text.Json.JsonSerializerOptions s_jsonOptions =
+        new(System.Text.Json.JsonSerializerDefaults.Web);
+
     private readonly HttpClient _http;
     private readonly HttpClient _longRunHttp; // separate client for long-running operations (e.g. bulk import)
     private readonly string _loginUrl;
@@ -153,14 +156,22 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
 
             if (!response.IsSuccessStatusCode) return null;
 
-            return await response.Content.ReadFromJsonAsync<ImportConversationsResult>(
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true },
-                ct);
+            return await response.Content.ReadFromJsonAsync<ImportConversationsResult>(s_jsonOptions, ct);
         }
         catch (Exception)
         {
             return null;
         }
+    }
+
+    /// <summary>Returns component health from the daemon's /api/components endpoint, or null if daemon unreachable.</summary>
+    public async Task<ComponentsResponse?> GetComponentsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<ComponentsResponse>("/api/components", s_jsonOptions, ct);
+        }
+        catch { return null; }
     }
 
     public void Dispose()
@@ -177,6 +188,21 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         public bool LicenseValid { get; set; }
         public string LicenseStatus { get; set; } = string.Empty;
         public string Uptime { get; set; } = string.Empty;
+    }
+}
+
+/// <summary>Component health DTO returned by the daemon's /api/components endpoint.</summary>
+public sealed class ComponentsResponse
+{
+    public ComponentInfo SesMcp    { get; set; } = new();
+    public ComponentInfo Daemon    { get; set; } = new();
+    public ComponentInfo SesHooks  { get; set; } = new();
+
+    public sealed class ComponentInfo
+    {
+        public bool    Installed  { get; set; }
+        public bool    Configured { get; set; }
+        public string? Version    { get; set; }
     }
 }
 
