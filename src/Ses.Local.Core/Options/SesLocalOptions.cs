@@ -108,6 +108,13 @@ public sealed class SesLocalOptions
     public string EmbeddingModelPath { get; set; } =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ses", "models", "all-MiniLM-L6-v2.onnx");
 
+    /// <summary>
+    /// TCP port for the browser extension / OAuth loopback listener.
+    /// The identity server redirects to http://localhost:{BrowserListenerPort}/auth/callback after sign-in.
+    /// Default: 37780. Override in tests to avoid port conflicts.
+    /// </summary>
+    public int BrowserListenerPort { get; init; } = 37780;
+
     // ── Telemetry ─────────────────────────────────────────────────────────────
 
     /// <summary>

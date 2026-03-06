@@ -8,6 +8,7 @@ using Xunit;
 using Moq;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Options;
+using Ses.Local.Workers.Services;
 using Ses.Local.Workers.Workers;
 
 namespace Ses.Local.Workers.Tests.Workers;
@@ -167,5 +168,81 @@ public sealed class BrowserExtensionListenerTests
         Assert.Single(payload.Conversations);
         Assert.Equal("abc", payload.Conversations[0].Uuid);
         Assert.Single(payload.Conversations[0].Messages);
+    }
+
+    /// <summary>
+    /// End-to-end: BrowserExtensionListener receives GET /auth/callback, stores tokens via AuthService,
+    /// transitions state to Authenticated, and returns a success HTML page.
+    /// Uses a dynamically-allocated free port and InMemoryCredentialStore — no keychain required.
+    /// </summary>
+    [Fact]
+    public async Task Listener_AuthCallback_StoresTokensAndReturnsSuccessHtml()
+    {
+        var port     = AllocateFreePort();
+        var keychain = new InMemoryCredentialStore();
+        var identity = BuildNullIdentityClient();
+        var auth     = new AuthService(keychain, identity,
+            NullLogger<AuthService>.Instance,
+            Options.Create(new SesLocalOptions()));
+
+        var db       = new Mock<ILocalDbService>();
+        var opts     = Options.Create(new SesLocalOptions { BrowserListenerPort = port });
+        var listener = new BrowserExtensionListener(db.Object, auth,
+            NullLogger<BrowserExtensionListener>.Instance, opts);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        _ = listener.StartAsync(cts.Token);
+        await Task.Delay(200, cts.Token); // allow listener to bind
+
+        var refreshToken = "integration_refresh_token";
+        var accessToken  = TestJwtHelper.CreateFakeJwt(DateTime.UtcNow.AddMinutes(15));
+
+        using var http = new HttpClient();
+        var resp = await http.GetAsync(
+            $"http://localhost:{port}/auth/callback" +
+            $"?refresh={Uri.EscapeDataString(refreshToken)}" +
+            $"&access={Uri.EscapeDataString(accessToken)}",
+            cts.Token);
+
+        // HTTP response must be 200 with success HTML
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var html = await resp.Content.ReadAsStringAsync(cts.Token);
+        Assert.Contains("Authentication Successful", html);
+
+        // Refresh token stored in credential store
+        var storedRefresh = await keychain.GetAsync("ses-local-refresh");
+        Assert.Equal(refreshToken, storedRefresh);
+
+        // AuthService reports Authenticated state
+        var state = await auth.GetStateAsync();
+        Assert.True(state.IsAuthenticated);
+
+        await listener.StopAsync(CancellationToken.None);
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>Finds a free TCP port on loopback by binding to port 0.</summary>
+    private static int AllocateFreePort()
+    {
+        using var tmp = new TcpListener(System.Net.IPAddress.Loopback, 0);
+        tmp.Start();
+        var port = ((System.Net.IPEndPoint)tmp.LocalEndpoint).Port;
+        tmp.Stop();
+        return port;
+    }
+
+    /// <summary>IdentityClient backed by a handler that returns 401 for all requests (PAT derivation is best-effort).</summary>
+    private static IdentityClient BuildNullIdentityClient()
+    {
+        var handler = new AlwaysUnauthorizedHandler();
+        var http    = new HttpClient(handler) { BaseAddress = new Uri("https://identity.test/") };
+        return new IdentityClient(http, NullLogger<IdentityClient>.Instance);
+    }
+
+    private sealed class AlwaysUnauthorizedHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized));
     }
 }

@@ -28,6 +28,11 @@ public sealed class AuthService : IAuthService
     private DateTime _cachedAccessTokenExpiry = DateTime.MinValue;
     private readonly SemaphoreSlim _renewLock = new(1, 1);
 
+    // Reauth debounce: prevents multiple browser tabs when TriggerReauthAsync is called concurrently
+    // (e.g. daemon startup + token renewal racing). 0 = free, 1 = in progress.
+    private int _reauthInProgress;
+    private volatile bool _loginTimedOut;
+
     public AuthService(
         ICredentialStore keychain,
         IdentityClient identity,
@@ -51,6 +56,10 @@ public sealed class AuthService : IAuthService
         var expiry = ParseExpiry(accessToken);
         _cachedAccessToken       = accessToken;
         _cachedAccessTokenExpiry = expiry;
+
+        // Clear any pending reauth state
+        _loginTimedOut = false;
+        Interlocked.Exchange(ref _reauthInProgress, 0);
 
         // Derive and store PAT for ses-mcp
         await DerivePat(accessToken, ct);
@@ -85,9 +94,9 @@ public sealed class AuthService : IAuthService
         if (token is null)
         {
             var refresh = await _keychain.GetAsync(KeyRefresh, ct);
-            return string.IsNullOrEmpty(refresh)
-                ? SesAuthState.Unauthenticated
-                : SesAuthState.ReauthRequired;
+            if (!string.IsNullOrEmpty(refresh))
+                return SesAuthState.ReauthRequired;
+            return new SesAuthState { LoginTimedOut = _loginTimedOut };
         }
         return new SesAuthState
         {
@@ -108,11 +117,61 @@ public sealed class AuthService : IAuthService
 
     public Task TriggerReauthAsync(CancellationToken ct = default)
     {
-        // Open browser to re-auth login (no install token required for re-auth)
+        // Debounce: if reauth is already in progress, don't open a second browser tab
+        if (Interlocked.CompareExchange(ref _reauthInProgress, 1, 0) != 0)
+        {
+            _logger.LogDebug("Reauth already in progress — ignoring duplicate request");
+            return Task.CompletedTask;
+        }
+
         var url = $"{_loginUrl}?reauth=true";
         _logger.LogInformation("Triggering re-auth: {Url}", url);
         OpenBrowser(url);
+
+        // Background: poll for auth completion; update status after 5-minute timeout.
+        // CancellationToken.None: the poll must outlive the caller's request lifetime.
+        _ = PollForAuthCompletionAsync(CancellationToken.None);
         return Task.CompletedTask;
+    }
+
+    private async Task PollForAuthCompletionAsync(CancellationToken ct = default)
+    {
+        var deadline = DateTime.UtcNow.AddMinutes(5);
+        try
+        {
+            while (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                if (_cachedAccessToken is not null)
+                {
+                    _logger.LogInformation("Reauth completed — access token received");
+                    Interlocked.Exchange(ref _reauthInProgress, 0);
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Auth polling cancelled");
+            Interlocked.Exchange(ref _reauthInProgress, 0);
+            return;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Auth polling interrupted");
+        }
+
+        // Final check: token may have arrived during the last delay window
+        if (_cachedAccessToken is not null)
+        {
+            _logger.LogInformation("Reauth completed — access token received (late arrival)");
+            Interlocked.Exchange(ref _reauthInProgress, 0);
+            return;
+        }
+
+        _logger.LogWarning("Login timed out after 5 minutes — user did not complete authentication");
+        _loginTimedOut = true;
+        Interlocked.Exchange(ref _reauthInProgress, 0);
     }
 
     public async Task<string?> GetPatAsync(CancellationToken ct = default) =>

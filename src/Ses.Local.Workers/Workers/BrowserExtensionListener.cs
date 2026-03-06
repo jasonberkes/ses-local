@@ -25,33 +25,31 @@ public sealed class BrowserExtensionListener : BackgroundService
     private readonly ILogger<BrowserExtensionListener> _logger;
     private readonly SesLocalOptions _options;
 
-    private const int Port = 37780;
-
     public BrowserExtensionListener(
         ILocalDbService db,
         IAuthService auth,
         ILogger<BrowserExtensionListener> logger,
         IOptions<SesLocalOptions> options)
     {
-        _db       = db;
-        _auth     = auth;
-        _logger   = logger;
-        _options  = options.Value;
+        _db      = db;
+        _auth    = auth;
+        _logger  = logger;
+        _options = options.Value;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var listener = new HttpListener();
-        listener.Prefixes.Add($"http://localhost:{Port}/");
+        listener.Prefixes.Add($"http://localhost:{_options.BrowserListenerPort}/");
 
         try
         {
             listener.Start();
-            _logger.LogInformation("BrowserExtensionListener started on http://localhost:{Port}/", Port);
+            _logger.LogInformation("BrowserExtensionListener started on http://localhost:{Port}/", _options.BrowserListenerPort);
         }
         catch (HttpListenerException ex)
         {
-            _logger.LogWarning(ex, "Failed to start HTTP listener on port {Port} — extension sync unavailable", Port);
+            _logger.LogWarning(ex, "Failed to start HTTP listener on port {Port} — extension sync unavailable", _options.BrowserListenerPort);
             return;
         }
 

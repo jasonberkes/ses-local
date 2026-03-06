@@ -70,6 +70,7 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
             {
                 IsAuthenticated = resp.Authenticated,
                 NeedsReauth     = resp.NeedsReauth,
+                LoginTimedOut   = resp.LoginTimedOut,
                 LicenseValid    = resp.LicenseValid,
                 LicenseStatus   = resp.LicenseStatus,
             };
@@ -172,6 +173,7 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
     {
         public bool Authenticated { get; set; }
         public bool NeedsReauth { get; set; }
+        public bool LoginTimedOut { get; set; }
         public bool LicenseValid { get; set; }
         public string LicenseStatus { get; set; } = string.Empty;
         public string Uptime { get; set; } = string.Empty;
