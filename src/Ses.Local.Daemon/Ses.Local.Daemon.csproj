@@ -2,10 +2,14 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>ses-local-daemon</AssemblyName>
+    <IsTrimmableExe>true</IsTrimmableExe>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Ses.Local.Core\Ses.Local.Core.csproj" />
     <ProjectReference Include="..\Ses.Local.Workers\Ses.Local.Workers.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <TrimmerRootDescriptor Include="trimmer-roots.xml" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />

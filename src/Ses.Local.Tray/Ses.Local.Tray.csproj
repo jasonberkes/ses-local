@@ -7,6 +7,7 @@
     <CFBundleIdentifier>com.supereasysoftware.ses-local</CFBundleIdentifier>
     <NSPrincipalClass>NSApplication</NSPrincipalClass>
     <LSUIElement>true</LSUIElement>
+    <IsTrimmableExe>true</IsTrimmableExe>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Assets\tray-icon.png" />
@@ -21,5 +22,8 @@
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+  <ItemGroup>
+    <TrimmerRootDescriptor Include="trimmer-roots.xml" />
   </ItemGroup>
 </Project>

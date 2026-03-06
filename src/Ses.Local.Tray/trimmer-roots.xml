@@ -1,0 +1,7 @@
+<linker>
+  <assembly fullname="Ses.Local.Tray" preserve="all" />
+  <assembly fullname="Ses.Local.Core" preserve="all" />
+  <assembly fullname="Avalonia" preserve="all" />
+  <assembly fullname="Avalonia.Desktop" preserve="all" />
+  <assembly fullname="Avalonia.Themes.Fluent" preserve="all" />
+</linker>

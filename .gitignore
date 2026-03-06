@@ -354,3 +354,4 @@ FodyWeavers.xsd
 .ses/
 *.ses-install-token
 .claude/worktrees/
+publish-*/
