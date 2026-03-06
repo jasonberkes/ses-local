@@ -290,12 +290,12 @@ public sealed class ChatGptExportParser : IConversationImporter
             foreach (var part in contentObj.Parts)
             {
                 // Parts are JsonElement — may be string or object
-                if (part.ValueKind == System.Text.Json.JsonValueKind.String)
+                if (part.ValueKind == JsonValueKind.String)
                 {
                     var s = part.GetString();
                     if (!string.IsNullOrWhiteSpace(s)) parts.Add(s.Trim());
                 }
-                else if (part.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                else if (part.ValueKind == JsonValueKind.Object &&
                          part.TryGetProperty("text", out var textProp))
                 {
                     var s = textProp.GetString();

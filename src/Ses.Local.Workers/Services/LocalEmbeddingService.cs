@@ -176,11 +176,11 @@ public sealed partial class LocalEmbeddingService : ILocalEmbeddingService
         }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         _session?.Dispose();
         _initLock.Dispose();
-        await Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Loading ONNX embedding model from {Path}")]
