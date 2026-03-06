@@ -20,10 +20,10 @@ public sealed class CausalityLinker
     private readonly ILogger<CausalityLinker> _logger;
 
     // Keywords that indicate a failed test result
-    private static readonly string[] FailKeywords = ["failed", "failure", "error", "FAILED", "FAILURE", "ERROR", "not ok"];
+    private static readonly string[] FailKeywords = ["failed", "failure", "error", "not ok"];
 
     // Keywords that indicate a passing test result
-    private static readonly string[] PassKeywords = ["passed", "succeeded", "ok", "PASSED", "succeeded", "success", "All tests passed"];
+    private static readonly string[] PassKeywords = ["passed", "succeeded", "ok", "success", "All tests passed"];
 
     public CausalityLinker(ILocalDbService db, ILogger<CausalityLinker> logger)
     {
@@ -235,8 +235,8 @@ public sealed class CausalityLinker
         string.Equals(obs.FilePath, filePath, StringComparison.OrdinalIgnoreCase);
 
     private static bool ContainsFailKeyword(string content) =>
-        FailKeywords.Any(k => content.Contains(k, StringComparison.Ordinal));
+        FailKeywords.Any(k => content.Contains(k, StringComparison.OrdinalIgnoreCase));
 
     private static bool ContainsPassKeyword(string content) =>
-        PassKeywords.Any(k => content.Contains(k, StringComparison.Ordinal));
+        PassKeywords.Any(k => content.Contains(k, StringComparison.OrdinalIgnoreCase));
 }
