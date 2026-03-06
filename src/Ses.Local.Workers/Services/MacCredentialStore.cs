@@ -89,10 +89,12 @@ public sealed class MacCredentialStore : ICredentialStore
 
     private static IntPtr CreateQuery(string account)
     {
-        var dict = CFDictionaryCreateMutable(IntPtr.Zero, 4, IntPtr.Zero, IntPtr.Zero);
+        var dict = CFDictionaryCreateMutable(IntPtr.Zero, 5, IntPtr.Zero, IntPtr.Zero);
         CFDictionarySetValue(dict, kSecClass, kSecClassGenericPassword);
         CFDictionarySetValue(dict, kSecAttrService, CFStringCreateWithCString(IntPtr.Zero, ServiceName, 0x08000100));
         CFDictionarySetValue(dict, kSecAttrAccount, CFStringCreateWithCString(IntPtr.Zero, account,     0x08000100));
+        // Accessible when unlocked — avoids re-prompting on unsigned/dev builds
+        CFDictionarySetValue(dict, kSecAttrAccessible, kSecAttrAccessibleWhenUnlocked);
         return dict;
     }
 
@@ -134,7 +136,9 @@ public sealed class MacCredentialStore : ICredentialStore
     private static readonly IntPtr kSecValueData            = Load("kSecValueData");
     private static readonly IntPtr kSecMatchLimit           = Load("kSecMatchLimit");
     private static readonly IntPtr kSecMatchLimitOne        = Load("kSecMatchLimitOne");
-    private static readonly IntPtr kCFBooleanTrue           = LoadCF("kCFBooleanTrue");
+    private static readonly IntPtr kCFBooleanTrue                   = LoadCF("kCFBooleanTrue");
+    private static readonly IntPtr kSecAttrAccessible                = Load("kSecAttrAccessible");
+    private static readonly IntPtr kSecAttrAccessibleWhenUnlocked    = Load("kSecAttrAccessibleWhenUnlocked");
 
     private static IntPtr LoadCF(string symbol)
     {
