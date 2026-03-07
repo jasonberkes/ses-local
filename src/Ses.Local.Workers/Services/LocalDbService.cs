@@ -1518,6 +1518,47 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    // ── Hook Activity (TRAY-3) ────────────────────────────────────────────────
+
+    public async Task<DateTime?> GetLastHookObservationTimeAsync(CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT MAX(o.created_at)
+            FROM conv_observations o
+            JOIN conv_sessions s ON s.id = o.session_id
+            WHERE s.source = @source
+            """;
+        cmd.Parameters.AddWithValue("@source", ConversationSource.ClaudeCode.ToString());
+        var result = await cmd.ExecuteScalarAsync(ct);
+        if (result is null || result == DBNull.Value || result is not string raw) return null;
+        return DateTime.Parse(raw, null, System.Globalization.DateTimeStyles.RoundtripKind);
+    }
+
+    public async Task<IReadOnlyList<ConversationObservation>> GetRecentHookObservationsAsync(int limit = 20, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        // content column is excluded — callers (tray log panel) only need tool_name, file_path, created_at
+        cmd.CommandText = """
+            SELECT o.id, o.session_id, o.observation_type, o.tool_name, o.file_path, '' AS content,
+                   o.token_count, o.sequence_number, o.parent_observation_id, o.created_at
+            FROM conv_observations o
+            JOIN conv_sessions s ON s.id = o.session_id
+            WHERE s.source = @source
+            ORDER BY o.created_at DESC
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@source", ConversationSource.ClaudeCode.ToString());
+        cmd.Parameters.AddWithValue("@limit", limit);
+        var results = new List<ConversationObservation>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            results.Add(MapObservation(reader));
+        return results;
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_connection is not null)

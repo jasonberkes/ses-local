@@ -49,6 +49,12 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     private string _restartStatus = "";
     private bool _isRestarting;
 
+    // ── Hooks state (TRAY-3) ───────────────────────────────────────────────────
+    private StatusDot _hooksStatusDot = StatusDot.Grey;
+    private string _hooksStatusText = "Loading...";
+    private string _hooksLastActivity = string.Empty;
+    private bool _isLogsExpanded;
+
     public string CcModelName
     {
         get => _ccModelName;
@@ -82,8 +88,41 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     public string CcHooksSummary
     {
         get => _ccHooksSummary;
-        set { _ccHooksSummary = value; OnPropertyChanged(); }
+        set { _ccHooksSummary = value; OnPropertyChanged(); OnPropertyChanged(nameof(HooksEnabled)); OnPropertyChanged(nameof(HooksToggleLabel)); }
     }
+
+    public StatusDot HooksStatusDot
+    {
+        get => _hooksStatusDot;
+        set { _hooksStatusDot = value; OnPropertyChanged(); }
+    }
+
+    public string HooksStatusText
+    {
+        get => _hooksStatusText;
+        set { _hooksStatusText = value; OnPropertyChanged(); }
+    }
+
+    public string HooksLastActivity
+    {
+        get => _hooksLastActivity;
+        set { _hooksLastActivity = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasLastActivity)); }
+    }
+
+    public bool HasLastActivity => !string.IsNullOrEmpty(_hooksLastActivity);
+
+    /// <summary>Derived from CcHooksSummary — true when any hooks are registered in settings.json.</summary>
+    public bool HooksEnabled => _ccHooksSummary != "(none)";
+
+    public string HooksToggleLabel => HooksEnabled ? "Disable" : "Enable";
+
+    public bool IsLogsExpanded
+    {
+        get => _isLogsExpanded;
+        set { _isLogsExpanded = value; OnPropertyChanged(); }
+    }
+
+    public ObservableCollection<HookLogEntry> RecentLogs { get; } = [];
 
     public ObservableCollection<McpServerViewModel> CcMcpServers      { get; } = [];
     public ObservableCollection<McpServerViewModel> DesktopMcpServers { get; } = [];
@@ -371,7 +410,10 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     {
         SelectedTab = tab;
         if (tab == PanelTab.CcConfig)
+        {
             RefreshCcConfig();
+            _ = RefreshHooksStatusAsync();
+        }
     }
 
     public void RefreshCcConfig()
@@ -402,6 +444,81 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
                 DesktopMcpServers.Add(new McpServerViewModel(s));
         }
         catch { /* read error — leave existing values */ }
+    }
+
+    /// <summary>Refreshes hooks health status from the daemon (binary check + last activity).</summary>
+    public async Task RefreshHooksStatusAsync(CancellationToken ct = default)
+    {
+        // Fetch extended status from daemon (includes binary check + last activity)
+        var status = await _daemonProxy.GetHooksStatusAsync(ct);
+        if (status is null)
+        {
+            HooksStatusDot  = StatusDot.Grey;
+            HooksStatusText = "Daemon not reachable";
+            return;
+        }
+
+        if (!status.BinaryExists)
+        {
+            HooksStatusDot  = StatusDot.Red;
+            HooksStatusText = "Binary not found — reinstall needed";
+        }
+        else if (!status.Registered)
+        {
+            HooksStatusDot  = StatusDot.Grey;
+            HooksStatusText = _ccSettings.AreHooksDisabled() ? "Disabled" : "Not configured";
+        }
+        else if (status.LastActivity is not null && (DateTime.UtcNow - status.LastActivity.Value) < TimeSpan.FromHours(1))
+        {
+            HooksStatusDot  = StatusDot.Green;
+            HooksStatusText = "Active";
+        }
+        else
+        {
+            HooksStatusDot  = StatusDot.Yellow;
+            HooksStatusText = "Registered (no recent activity)";
+        }
+
+        HooksLastActivity = status.LastActivity is null
+            ? string.Empty
+            : FormatAge(status.LastActivity.Value.ToLocalTime());
+    }
+
+    /// <summary>Toggles hooks on or off. If enabling and no saved hooks exist, asks daemon to register fresh.</summary>
+    public async Task ToggleHooksAsync(CancellationToken ct = default)
+    {
+        if (HooksEnabled)
+        {
+            _ccSettings.DisableHooks();
+        }
+        else
+        {
+            var restored = _ccSettings.EnableHooks();
+            if (!restored)
+                await _daemonProxy.EnableHooksAsync(ct);
+        }
+
+        RefreshCcConfig();
+        await RefreshHooksStatusAsync(ct);
+    }
+
+    /// <summary>Loads the last 20 hook observations and toggles the log panel.</summary>
+    public async Task ToggleLogsExpandedAsync(CancellationToken ct = default)
+    {
+        if (_isLogsExpanded)
+        {
+            IsLogsExpanded = false;
+            return;
+        }
+
+        var logs = await _daemonProxy.GetHookLogsAsync(ct);
+        RecentLogs.Clear();
+        if (logs is not null)
+        {
+            foreach (var entry in logs)
+                RecentLogs.Add(entry);
+        }
+        IsLogsExpanded = true;
     }
 
     public void ChangeCcModel(string model)

@@ -172,6 +172,46 @@ public sealed class ClaudeCodeSettingsService : IDisposable
             || (root["_mcpDisabled"] as JsonObject)?.ContainsKey(name) == true;
     }
 
+    /// <summary>
+    /// Moves the active hooks section to _hooksDisabled (toggle off).
+    /// Idempotent: no-op if hooks are already empty/absent.
+    /// </summary>
+    public void DisableHooks()
+    {
+        var root = TryReadJson(_settingsPath) ?? new JsonObject();
+        if (root["hooks"] is JsonObject hooksObj && hooksObj.Count > 0)
+        {
+            root["_hooksDisabled"] = hooksObj.DeepClone();
+            root["hooks"] = new JsonObject();
+            File.WriteAllText(_settingsPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        }
+    }
+
+    /// <summary>
+    /// Restores hooks from _hooksDisabled (toggle on).
+    /// Returns true if restored successfully; false if _hooksDisabled was absent
+    /// (caller should trigger a fresh registration via the daemon).
+    /// </summary>
+    public bool EnableHooks()
+    {
+        var root = TryReadJson(_settingsPath) ?? new JsonObject();
+        if (root["_hooksDisabled"] is JsonObject disabled && disabled.Count > 0)
+        {
+            root["hooks"] = disabled.DeepClone();
+            root.Remove("_hooksDisabled");
+            File.WriteAllText(_settingsPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>Returns true if hooks were explicitly disabled (the _hooksDisabled key exists with entries).</summary>
+    public bool AreHooksDisabled()
+    {
+        var root = TryReadJson(_settingsPath);
+        return root is not null && root["_hooksDisabled"] is JsonObject disabled && disabled.Count > 0;
+    }
+
     // ── private helpers ───────────────────────────────────────────────────────
 
     internal static JsonObject? TryReadJson(string path)

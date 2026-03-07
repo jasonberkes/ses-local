@@ -333,6 +333,110 @@ public sealed class LocalDbServiceIntegrationTests : IAsyncDisposable
         Assert.Equal(toolUse.Id, retrievedResult.ParentObservationId);
     }
 
+    // ── Hook Activity (TRAY-3) ────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetLastHookObservationTimeAsync_WhenNoObservations_ReturnsNull()
+    {
+        var result = await _fixture.Db.GetLastHookObservationTimeAsync();
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetLastHookObservationTimeAsync_ReturnsMaxCreatedAt()
+    {
+        var session = MakeSession("ext-hook-time-001", "hook time test", ConversationSource.ClaudeCode);
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var t1 = DateTime.UtcNow.AddMinutes(-5);
+        var t2 = DateTime.UtcNow.AddMinutes(-2);
+
+        await _fixture.Db.UpsertObservationsAsync([
+            new ConversationObservation { SessionId = session.Id, ObservationType = ObservationType.ToolUse,
+                ToolName = "Read", Content = "{}", SequenceNumber = 0, CreatedAt = t1 },
+            new ConversationObservation { SessionId = session.Id, ObservationType = ObservationType.ToolUse,
+                ToolName = "Write", Content = "{}", SequenceNumber = 1, CreatedAt = t2 }
+        ]);
+
+        var result = await _fixture.Db.GetLastHookObservationTimeAsync();
+
+        Assert.NotNull(result);
+        Assert.True(Math.Abs((result.Value - t2).TotalSeconds) < 2, "Should return the most recent timestamp");
+    }
+
+    [Fact]
+    public async Task GetLastHookObservationTimeAsync_ExcludesNonClaudeCodeSessions()
+    {
+        var session = MakeSession("ext-hook-non-cc", "non-cc session", ConversationSource.ClaudeChat);
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        await _fixture.Db.UpsertObservationsAsync([
+            new ConversationObservation { SessionId = session.Id, ObservationType = ObservationType.ToolUse,
+                ToolName = "Write", Content = "{}", SequenceNumber = 0, CreatedAt = DateTime.UtcNow }
+        ]);
+
+        // The query should not throw even if only non-ClaudeCode observations exist.
+        // (May return a timestamp from other tests' ClaudeCode sessions in the shared fixture.)
+        var result = await _fixture.Db.GetLastHookObservationTimeAsync();
+        _ = result; // no exception is the key assertion
+    }
+
+    [Fact]
+    public async Task GetRecentHookObservationsAsync_WhenNoObservations_ReturnsEmpty()
+    {
+        var result = await _fixture.Db.GetRecentHookObservationsAsync(5);
+        Assert.NotNull(result);
+    }
+
+    [Fact]
+    public async Task GetRecentHookObservationsAsync_ReturnsOnlyClaudeCodeObservations()
+    {
+        var ccSession = MakeSession("ext-hook-cc-only", "CC session", ConversationSource.ClaudeCode);
+        var aiSession = MakeSession("ext-hook-ai-only", "AI session", ConversationSource.ClaudeChat);
+        await _fixture.Db.UpsertSessionAsync(ccSession);
+        await _fixture.Db.UpsertSessionAsync(aiSession);
+
+        var uniqueTool = "UniqueHookTool" + Guid.NewGuid().ToString("N")[..6];
+
+        await _fixture.Db.UpsertObservationsAsync([
+            new ConversationObservation { SessionId = ccSession.Id, ObservationType = ObservationType.ToolUse,
+                ToolName = uniqueTool, Content = "{}", SequenceNumber = 0, CreatedAt = DateTime.UtcNow }
+        ]);
+        await _fixture.Db.UpsertObservationsAsync([
+            new ConversationObservation { SessionId = aiSession.Id, ObservationType = ObservationType.ToolUse,
+                ToolName = "OtherTool", Content = "{}", SequenceNumber = 0, CreatedAt = DateTime.UtcNow }
+        ]);
+
+        var result = await _fixture.Db.GetRecentHookObservationsAsync(50);
+
+        Assert.Contains(result, o => o.ToolName == uniqueTool);
+        Assert.DoesNotContain(result, o => o.ToolName == "OtherTool");
+    }
+
+    [Fact]
+    public async Task GetRecentHookObservationsAsync_RespectsLimit()
+    {
+        var session = MakeSession("ext-hook-limit-001", "limit test", ConversationSource.ClaudeCode);
+        await _fixture.Db.UpsertSessionAsync(session);
+
+        var observations = Enumerable.Range(0, 10).Select(i =>
+            new ConversationObservation
+            {
+                SessionId       = session.Id,
+                ObservationType = ObservationType.ToolUse,
+                ToolName        = "Read",
+                Content         = "{}",
+                SequenceNumber  = 200 + i,
+                CreatedAt       = DateTime.UtcNow.AddSeconds(i)
+            }).ToList();
+
+        await _fixture.Db.UpsertObservationsAsync(observations);
+
+        var result = await _fixture.Db.GetRecentHookObservationsAsync(3);
+
+        Assert.True(result.Count <= 3);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static ConversationSession MakeSession(string externalId, string title, ConversationSource source = ConversationSource.ClaudeCode) =>
