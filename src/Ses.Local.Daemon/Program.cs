@@ -64,6 +64,7 @@ internal static class Program
         builder.Services.AddHostedService<LevelDbWatcher>();
         builder.Services.AddHostedService<ClaudeCodeWatcher>();
         builder.Services.AddHostedService<CoworkWatcher>();
+        builder.Services.AddHostedService<ChatGptDesktopWatcher>();
         builder.Services.AddHostedService<CloudSyncWorker>();
         builder.Services.AddHostedService<CloudPullWorker>();
         builder.Services.AddHostedService<BrowserExtensionListener>();

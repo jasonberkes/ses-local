@@ -44,16 +44,16 @@ public sealed class DropdownPanelViewModelTests
         Assert.Contains("Claude Desktop", names);
         Assert.Contains("Claude Code",    names);
         Assert.Contains("Cowork",         names);
-        Assert.Contains("ChatGPT",        names);
+        Assert.Contains("ChatGPT Desktop", names);
     }
 
     [Fact]
-    public void ChatGptFeature_IsMarkedComingSoon()
+    public void ChatGptFeature_IsNotComingSoon()
     {
-        var vm     = CreateVm();
-        var chatGpt = vm.ConvSyncFeatures.First(f => f.Name == "ChatGPT");
+        var vm      = CreateVm();
+        var chatGpt = vm.ConvSyncFeatures.First(f => f.Name == "ChatGPT Desktop");
 
-        Assert.True(chatGpt.IsComingSoon);
+        Assert.False(chatGpt.IsComingSoon);
     }
 
     [Fact]
@@ -497,16 +497,13 @@ public sealed class DropdownPanelViewModelTests
     }
 
     [Fact]
-    public void ApplySyncStats_ComingSoonFeature_NotUpdated()
+    public void ApplySyncStats_ChatGptDesktopFeature_HasCorrectKey()
     {
         var vm = CreateVm();
-        var chatGpt = vm.ConvSyncFeatures.First(f => f.Key == "chatgpt_sync");
-        var originalActivity = chatGpt.LastActivity;
+        var chatGpt = vm.ConvSyncFeatures.First(f => f.Key == "chatgpt_desktop_sync");
 
-        vm.ApplySyncStats(new SyncStats());
-
-        // Coming-soon features should not get stats applied
-        Assert.Equal(originalActivity, chatGpt.LastActivity);
+        Assert.Equal("ChatGPT Desktop", chatGpt.Name);
+        Assert.False(chatGpt.IsComingSoon);
     }
 
     [Fact]
