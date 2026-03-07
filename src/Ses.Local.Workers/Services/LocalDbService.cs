@@ -536,6 +536,29 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             await ApplyMigration9Async(conn, ct);
             await SetUserVersionAsync(conn, 9, ct);
         }
+
+        if (version < 10)
+        {
+            await ApplyMigration10Async(conn, ct);
+            await SetUserVersionAsync(conn, 10, ct);
+        }
+    }
+
+    private static async Task ApplyMigration10Async(SqliteConnection conn, CancellationToken ct)
+    {
+        // import_history — record of each completed import operation (TRAY-5/6)
+        await ExecuteNonQueryAsync(conn, """
+            CREATE TABLE IF NOT EXISTS import_history (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                source              TEXT NOT NULL,
+                file_path           TEXT NOT NULL,
+                imported_at         TEXT NOT NULL,
+                sessions_imported   INTEGER NOT NULL DEFAULT 0,
+                messages_imported   INTEGER NOT NULL DEFAULT 0,
+                duplicates_skipped  INTEGER NOT NULL DEFAULT 0,
+                errors              INTEGER NOT NULL DEFAULT 0
+            )
+            """, ct);
     }
 
     private static async Task ApplyMigration1Async(SqliteConnection conn, CancellationToken ct)
@@ -1631,6 +1654,65 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
             OldestConversation  = oldest,
             NewestConversation  = newest,
         };
+    }
+
+    // ── Import History (TRAY-5/6) ─────────────────────────────────────────────
+
+    public async Task RecordImportHistoryAsync(ImportHistoryRecord record, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO import_history
+                (source, file_path, imported_at, sessions_imported, messages_imported, duplicates_skipped, errors)
+            VALUES
+                (@source, @file_path, @imported_at, @sessions, @messages, @dupes, @errors)
+            """;
+        cmd.Parameters.AddWithValue("@source",    record.Source);
+        cmd.Parameters.AddWithValue("@file_path", record.FilePath);
+        cmd.Parameters.AddWithValue("@imported_at", record.ImportedAt.ToString("O"));
+        cmd.Parameters.AddWithValue("@sessions",  record.SessionsImported);
+        cmd.Parameters.AddWithValue("@messages",  record.MessagesImported);
+        cmd.Parameters.AddWithValue("@dupes",     record.DuplicatesSkipped);
+        cmd.Parameters.AddWithValue("@errors",    record.Errors);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<ImportHistoryRecord?> GetLastImportAsync(CancellationToken ct = default)
+    {
+        var history = await GetImportHistoryAsync(1, ct);
+        return history.Count > 0 ? history[0] : null;
+    }
+
+    public async Task<IReadOnlyList<ImportHistoryRecord>> GetImportHistoryAsync(int limit = 20, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT id, source, file_path, imported_at,
+                   sessions_imported, messages_imported, duplicates_skipped, errors
+            FROM import_history
+            ORDER BY imported_at DESC
+            LIMIT @limit
+            """;
+        cmd.Parameters.AddWithValue("@limit", limit);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        var results = new List<ImportHistoryRecord>();
+        while (await reader.ReadAsync(ct))
+        {
+            results.Add(new ImportHistoryRecord
+            {
+                Id                = reader.GetInt64(0),
+                Source            = reader.GetString(1),
+                FilePath          = reader.GetString(2),
+                ImportedAt        = DateTime.Parse(reader.GetString(3), null, System.Globalization.DateTimeStyles.RoundtripKind),
+                SessionsImported  = reader.GetInt32(4),
+                MessagesImported  = reader.GetInt32(5),
+                DuplicatesSkipped = reader.GetInt32(6),
+                Errors            = reader.GetInt32(7),
+            });
+        }
+        return results;
     }
 
     public async ValueTask DisposeAsync()

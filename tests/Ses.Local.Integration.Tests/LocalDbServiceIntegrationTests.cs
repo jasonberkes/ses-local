@@ -504,6 +504,109 @@ public sealed class LocalDbServiceIntegrationTests : IAsyncDisposable
         Assert.True(stats.OldestConversation <= stats.NewestConversation);
     }
 
+    // ── Import History (TRAY-5/6) ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetImportHistoryAsync_EmptyDatabase_ReturnsEmptyList()
+    {
+        var history = await _fixture.Db.GetImportHistoryAsync();
+
+        Assert.Empty(history);
+    }
+
+    [Fact]
+    public async Task GetLastImportAsync_EmptyDatabase_ReturnsNull()
+    {
+        var last = await _fixture.Db.GetLastImportAsync();
+
+        Assert.Null(last);
+    }
+
+    [Fact]
+    public async Task RecordImportHistoryAsync_Persists_AndIsReturnedByGetHistory()
+    {
+        var record = new ImportHistoryRecord
+        {
+            Source            = "claude",
+            FilePath          = "/tmp/export.json",
+            ImportedAt        = DateTime.UtcNow,
+            SessionsImported  = 42,
+            MessagesImported  = 1234,
+            DuplicatesSkipped = 5,
+            Errors            = 0,
+        };
+
+        await _fixture.Db.RecordImportHistoryAsync(record);
+        var history = await _fixture.Db.GetImportHistoryAsync();
+
+        Assert.Single(history);
+        Assert.Equal("claude",          history[0].Source);
+        Assert.Equal("/tmp/export.json", history[0].FilePath);
+        Assert.Equal(42,                history[0].SessionsImported);
+        Assert.Equal(1234,              history[0].MessagesImported);
+        Assert.Equal(5,                 history[0].DuplicatesSkipped);
+        Assert.Equal(0,                 history[0].Errors);
+    }
+
+    [Fact]
+    public async Task GetLastImportAsync_ReturnsNewestRecord()
+    {
+        var old = new ImportHistoryRecord
+        {
+            Source     = "chatgpt",
+            FilePath   = "/tmp/old.zip",
+            ImportedAt = DateTime.UtcNow.AddDays(-2),
+        };
+        var newer = new ImportHistoryRecord
+        {
+            Source     = "claude",
+            FilePath   = "/tmp/new.json",
+            ImportedAt = DateTime.UtcNow,
+        };
+
+        await _fixture.Db.RecordImportHistoryAsync(old);
+        await _fixture.Db.RecordImportHistoryAsync(newer);
+
+        var last = await _fixture.Db.GetLastImportAsync();
+
+        Assert.NotNull(last);
+        Assert.Equal("claude", last.Source);
+        Assert.Equal("/tmp/new.json", last.FilePath);
+    }
+
+    [Fact]
+    public async Task GetImportHistoryAsync_RespectsLimitParameter()
+    {
+        for (var i = 0; i < 5; i++)
+        {
+            await _fixture.Db.RecordImportHistoryAsync(new ImportHistoryRecord
+            {
+                Source     = "claude",
+                FilePath   = $"/tmp/export-{i}.json",
+                ImportedAt = DateTime.UtcNow.AddMinutes(-i),
+            });
+        }
+
+        var history = await _fixture.Db.GetImportHistoryAsync(3);
+
+        Assert.Equal(3, history.Count);
+    }
+
+    [Fact]
+    public async Task GetImportHistoryAsync_OrderedByImportedAtDesc()
+    {
+        var t1 = DateTime.UtcNow.AddHours(-3);
+        var t2 = DateTime.UtcNow.AddHours(-1);
+
+        await _fixture.Db.RecordImportHistoryAsync(new ImportHistoryRecord { Source = "claude", FilePath = "/a", ImportedAt = t1 });
+        await _fixture.Db.RecordImportHistoryAsync(new ImportHistoryRecord { Source = "chatgpt", FilePath = "/b", ImportedAt = t2 });
+
+        var history = await _fixture.Db.GetImportHistoryAsync();
+
+        Assert.Equal("/b", history[0].FilePath); // newer first
+        Assert.Equal("/a", history[1].FilePath);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static ConversationSession MakeSession(string externalId, string title, ConversationSource source = ConversationSource.ClaudeCode) =>

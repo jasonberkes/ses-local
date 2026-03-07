@@ -240,11 +240,35 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     private ComponentStatus _sesMcpStatus  = null!;
     private ComponentStatus _sesHooksStatus = null!;
 
+    // ── Import tab state ───────────────────────────────────────────────────────
+    private string          _importLastImportText      = string.Empty;
+    private string          _importReImportMessage     = string.Empty;
+    private volatile bool   _importHistoryRefreshPending;
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public ObservableCollection<FeatureStatus> ConvSyncFeatures { get; } = [];
     public ObservableCollection<FeatureStatus> MemoryFeatures { get; } = [];
     public ObservableCollection<ComponentStatus> Components { get; } = [];
+
+    public ImportWizardViewModel? ImportWizard { get; }
+    public ObservableCollection<ImportHistoryRecord> ImportHistory { get; } = [];
+
+    public string ImportLastImportText
+    {
+        get => _importLastImportText;
+        set { _importLastImportText = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasImportHistory)); }
+    }
+
+    public bool HasImportHistory => !string.IsNullOrEmpty(_importLastImportText);
+
+    public string ImportReImportMessage
+    {
+        get => _importReImportMessage;
+        set { _importReImportMessage = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasReImportMessage)); }
+    }
+
+    public bool HasReImportMessage => !string.IsNullOrEmpty(_importReImportMessage);
 
     public string UserDisplayName
     {
@@ -292,7 +316,8 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     public string AppVersion => _appVersion;
 
     public DropdownPanelViewModel(IAuthService auth, DaemonAuthProxy daemonProxy, IOptions<SesLocalOptions> options,
-        ClaudeCodeSettingsService? ccSettings = null, ClaudeDesktopConfigService? desktopSettings = null)
+        ClaudeCodeSettingsService? ccSettings = null, ClaudeDesktopConfigService? desktopSettings = null,
+        ImportWizardViewModel? importWizard = null)
     {
         _auth            = auth;
         _daemonProxy     = daemonProxy;
@@ -303,6 +328,7 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         _desktopSettings     = desktopSettings ?? new ClaudeDesktopConfigService();
         _onSettingsChanged   = (_, _) => RefreshCcConfig();
         _ccSettings.SettingsChanged += _onSettingsChanged;
+        ImportWizard         = importWizard;
         InitFeatures();
         InitComponents();
         _ = LoadAsync();
@@ -482,14 +508,17 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         var count = surface.Count.ToString("N0") + (surface.Count == 1 ? " conversation" : " conversations");
         if (!surface.LastActivity.HasValue) return count;
 
-        var age = DateTime.UtcNow - surface.LastActivity.Value;
-        var timeStr = age.TotalSeconds < 60   ? "just now"
-                    : age.TotalMinutes < 60   ? $"{(int)age.TotalMinutes} min ago"
-                    : age.TotalHours < 24     ? $"{(int)age.TotalHours}h ago"
-                    : age.TotalDays < 7       ? $"{(int)age.TotalDays}d ago"
-                    :                            surface.LastActivity.Value.ToLocalTime().ToString("MMM d");
+        return $"{count} · {FormatRelativeTime(surface.LastActivity.Value)}";
+    }
 
-        return $"{count} · {timeStr}";
+    private static string FormatRelativeTime(DateTime utcTime)
+    {
+        var age = DateTime.UtcNow - utcTime;
+        return age.TotalSeconds < 60   ? "just now"
+             : age.TotalMinutes < 60   ? $"{(int)age.TotalMinutes} min ago"
+             : age.TotalHours   < 24   ? $"{(int)age.TotalHours}h ago"
+             : age.TotalDays    < 7    ? $"{(int)age.TotalDays}d ago"
+             :                            utcTime.ToLocalTime().ToString("MMM d");
     }
 
     private static string FormatBytes(long bytes)
@@ -543,6 +572,73 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
             RefreshCcConfig();
             _ = RefreshHooksStatusAsync();
         }
+        else if (tab == PanelTab.Import)
+        {
+            _ = RefreshImportHistoryAsync();
+        }
+    }
+
+    /// <summary>Fetches import history from the daemon and updates ImportHistory + LastImport text.</summary>
+    public async Task RefreshImportHistoryAsync(CancellationToken ct = default)
+    {
+        if (_importHistoryRefreshPending) return;
+        _importHistoryRefreshPending = true;
+
+        try
+        {
+            await RefreshImportHistoryInternalAsync(ct);
+        }
+        finally
+        {
+            _importHistoryRefreshPending = false;
+        }
+    }
+
+    private async Task RefreshImportHistoryInternalAsync(CancellationToken ct)
+    {
+        var history = await _daemonProxy.GetImportHistoryAsync(ct);
+        if (history is null) return;
+
+        ImportHistory.Clear();
+        foreach (var entry in history)
+            ImportHistory.Add(entry);
+
+        if (history.Count > 0)
+        {
+            ImportLastImportText = $"Last import: {FormatRelativeTime(history[0].ImportedAt)}";
+
+            if (ImportWizard is not null)
+                ImportWizard.LastImportInfo = ImportLastImportText;
+        }
+        else
+        {
+            ImportLastImportText = string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Starts a re-import for a history entry. If the file still exists, navigates the wizard to
+    /// the Instructions step with the file pre-populated. If missing, sets an error message.
+    /// </summary>
+    public void StartReImport(ImportHistoryRecord entry)
+    {
+        ImportReImportMessage = string.Empty;
+
+        if (!File.Exists(entry.FilePath))
+        {
+            ImportReImportMessage = $"File no longer available: {Path.GetFileName(entry.FilePath)}";
+            return;
+        }
+
+        if (ImportWizard is null) return;
+
+        var source = entry.Source.ToLowerInvariant() switch
+        {
+            "chatgpt" => ImportSource.ChatGPT,
+            "gemini"  => ImportSource.Gemini,
+            _         => ImportSource.Claude
+        };
+        ImportWizard.SelectSourceWithFile(source, entry.FilePath);
     }
 
     public void RefreshCcConfig()
@@ -824,6 +920,7 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         _ccSettings.SettingsChanged -= _onSettingsChanged;
         if (_ownsCcSettings)
             _ccSettings.Dispose();
+        ImportWizard?.Dispose();
     }
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>

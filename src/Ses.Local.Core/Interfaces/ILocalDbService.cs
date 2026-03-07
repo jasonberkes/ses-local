@@ -203,4 +203,15 @@ public interface ILocalDbService
     /// total message count, database file size, and oldest/newest conversation dates.
     /// </summary>
     Task<SyncStats> GetSyncStatsAsync(CancellationToken ct = default);
+
+    // ── Import History (TRAY-5/6) ─────────────────────────────────────────────
+
+    /// <summary>Appends a record of a completed import operation to the import_history table.</summary>
+    Task RecordImportHistoryAsync(ImportHistoryRecord record, CancellationToken ct = default);
+
+    /// <summary>Returns the most recent import history record, or null if no imports have been recorded.</summary>
+    Task<ImportHistoryRecord?> GetLastImportAsync(CancellationToken ct = default);
+
+    /// <summary>Returns the last <paramref name="limit"/> import history records ordered by imported_at DESC.</summary>
+    Task<IReadOnlyList<ImportHistoryRecord>> GetImportHistoryAsync(int limit = 20, CancellationToken ct = default);
 }

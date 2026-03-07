@@ -146,27 +146,47 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         => Task.FromResult<string?>(null); // Tray doesn't need PATs
 
     /// <summary>
-    /// Sends a Claude.ai export file to the daemon for import into local.db.
-    /// Returns null if the daemon is unreachable.
+    /// Triggers a background import on the daemon and returns immediately (202 Accepted).
+    /// Poll <see cref="GetImportStatusAsync"/> for progress updates.
+    /// Returns false if the daemon is unreachable or an import is already running.
     /// </summary>
-    public async Task<ImportConversationsResult?> ImportConversationsAsync(
-        string filePath, CancellationToken ct = default)
+    public async Task<bool> StartImportAsync(string filePath, CancellationToken ct = default)
     {
         try
         {
-            var response = await _longRunHttp.PostAsJsonAsync(
-                "/api/conversations/import",
-                new { filePath },
-                ct);
-
-            if (!response.IsSuccessStatusCode) return null;
-
-            return await response.Content.ReadFromJsonAsync<ImportConversationsResult>(s_jsonOptions, ct);
+            var response = await _http.PostAsJsonAsync("/api/conversations/import", new { filePath }, ct);
+            return response.StatusCode == System.Net.HttpStatusCode.Accepted;
         }
-        catch (Exception)
+        catch { return false; }
+    }
+
+    /// <summary>Returns the current import progress, or null if the daemon is unreachable.</summary>
+    public async Task<ImportStatusResponse?> GetImportStatusAsync(CancellationToken ct = default)
+    {
+        try
         {
-            return null;
+            return await _http.GetFromJsonAsync<ImportStatusResponse>(
+                "/api/conversations/import/status", s_jsonOptions, ct);
         }
+        catch { return null; }
+    }
+
+    /// <summary>Requests the daemon to cancel any in-progress import.</summary>
+    public async Task CancelImportAsync(CancellationToken ct = default)
+    {
+        try { await _http.PostAsync("/api/conversations/import/cancel", null, ct); }
+        catch { /* daemon unreachable */ }
+    }
+
+    /// <summary>Returns the last 20 import history records, or null if the daemon is unreachable.</summary>
+    public async Task<IReadOnlyList<ImportHistoryRecord>?> GetImportHistoryAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<List<ImportHistoryRecord>>(
+                "/api/conversations/import/history", s_jsonOptions, ct);
+        }
+        catch { return null; }
     }
 
     /// <summary>Returns component health from the daemon's /api/components endpoint, or null if daemon unreachable.</summary>
@@ -249,15 +269,6 @@ public sealed class ComponentsResponse
     }
 }
 
-/// <summary>Result DTO returned by the daemon's /api/conversations/import endpoint.</summary>
-public sealed class ImportConversationsResult
-{
-    public int SessionsImported { get; set; }
-    public int MessagesImported { get; set; }
-    public int Duplicates       { get; set; }
-    public int Errors           { get; set; }
-}
-
 /// <summary>DTO returned by the daemon's /api/hooks/status endpoint.</summary>
 public sealed class HooksStatusResponse
 {
@@ -273,3 +284,17 @@ public sealed class HookLogEntry
     public string?  ToolName  { get; set; }
     public string?  FilePath  { get; set; }
 }
+
+/// <summary>Progress/result DTO returned by GET /api/conversations/import/status.</summary>
+public sealed class ImportStatusResponse
+{
+    public bool    IsRunning       { get; set; }
+    public int     SessionsImported { get; set; }
+    public int     MessagesImported { get; set; }
+    public int     Duplicates       { get; set; }
+    public int     Errors           { get; set; }
+    public string  Format           { get; set; } = string.Empty;
+    public bool    WasCancelled     { get; set; }
+    public string? FailureMessage   { get; set; }
+}
+

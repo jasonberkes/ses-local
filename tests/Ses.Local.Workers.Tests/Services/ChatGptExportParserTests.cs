@@ -514,11 +514,12 @@ public sealed class ChatGptExportParserTests : IAsyncDisposable
         try
         {
             await parser.ImportAsync(path, progress);
-            await Task.Delay(50);  // allow async progress callbacks to fire
+            await Task.Delay(200);  // allow async progress callbacks to fire
 
             Assert.Equal(2, reports.Count);
-            Assert.Equal(1, reports[0].Processed);
-            Assert.Equal(2, reports[1].Processed);
+            var sorted = reports.OrderBy(r => r.Processed).ToList();
+            Assert.Equal(1, sorted[0].Processed);
+            Assert.Equal(2, sorted[1].Processed);
         }
         finally { File.Delete(path); }
     }

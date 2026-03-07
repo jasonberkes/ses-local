@@ -346,11 +346,11 @@ public partial class TrayApp : Application
 
         try
         {
-            var result = await proxy.ImportConversationsAsync(filePath);
+            var started = await proxy.StartImportAsync(filePath);
 
-            _importItem.Header = result is not null
-                ? $"✓ Imported {result.SessionsImported} conversations"
-                : "✕ Import failed (daemon unavailable)";
+            _importItem.Header = started
+                ? "Importing... (check Import tab for progress)"
+                : "✕ Import failed (daemon unavailable or import already running)";
 
             // Reset header after a few seconds
             _ = Task.Delay(TimeSpan.FromSeconds(6)).ContinueWith(_ =>
@@ -435,7 +435,8 @@ public partial class TrayApp : Application
 
         if (_dropdownPanel is null)
         {
-            var vm = new DropdownPanelViewModel(auth, daemonProxy, opts);
+            var importWizard = new ImportWizardViewModel(daemonProxy);
+            var vm = new DropdownPanelViewModel(auth, daemonProxy, opts, importWizard: importWizard);
             _dropdownPanel = new DropdownPanel(vm);
             _dropdownPanel.Closed += (_, _) => { vm.Dispose(); _dropdownPanel = null; };
         }
