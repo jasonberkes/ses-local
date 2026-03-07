@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ses-local: Claude Sync",
-  "version": "1.0.0",
-  "description": "Syncs your Claude conversations to ses-local for memory and search.",
+  "name": "ses-local: AI Conversation Sync",
+  "version": "1.1.0",
+  "description": "Syncs your Claude and ChatGPT conversations to ses-local for memory and search.",
   "permissions": [
     "storage",
     "alarms",
@@ -10,6 +10,8 @@
   ],
   "host_permissions": [
     "https://claude.ai/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
     "http://localhost:37780/*"
   ],
   "background": {
@@ -30,7 +32,7 @@
     "128": "icons/icon128.png"
   },
   "content_security_policy": {
-    "extension_pages": "default-src 'self'; connect-src https://claude.ai http://localhost:37780"
+    "extension_pages": "default-src 'self'; connect-src https://claude.ai https://chatgpt.com https://chat.openai.com http://localhost:37780"
   },
   "browser_specific_settings": {
     "gecko": {

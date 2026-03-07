@@ -166,14 +166,25 @@ public sealed class BrowserExtensionListener : BackgroundService
         return storedPat is not null && storedPat == token;
     }
 
+    private static ConversationSource ResolveSource(string? source) => source switch
+    {
+        "chatgpt"  => ConversationSource.ChatGpt,
+        "claude_ai" => ConversationSource.ClaudeChat,
+        _           => ConversationSource.ClaudeChat
+    };
+
     private async Task ProcessConversationAsync(ExtensionConversation conv, CancellationToken ct)
     {
         var hash = ComputeHash(conv);
+        var source = ResolveSource(conv.Source);
+
+        if (conv.Source is not null && source == ConversationSource.ClaudeChat && conv.Source != "claude_ai")
+            _logger.LogWarning("Unknown extension conversation source '{Source}' — defaulting to ClaudeChat", conv.Source);
 
         var session = new ConversationSession
         {
             ExternalId  = conv.Uuid,
-            Source      = ConversationSource.ClaudeChat,
+            Source      = source,
             Title       = conv.Name,
             ContentHash = hash,
             UpdatedAt   = conv.UpdatedAt,
@@ -296,6 +307,7 @@ public sealed class ExtensionConversation
     [JsonPropertyName("name")]       public string Name       { get; set; } = string.Empty;
     [JsonPropertyName("created_at")] public DateTime CreatedAt { get; set; }
     [JsonPropertyName("updated_at")] public DateTime UpdatedAt { get; set; }
+    [JsonPropertyName("source")]     public string? Source    { get; set; }
     [JsonPropertyName("messages")]   public List<ExtensionMessage> Messages { get; set; } = [];
 }
 

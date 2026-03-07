@@ -47,7 +47,20 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 
 ### Browser Extension
 
-`browser-extension/` — Chrome/Edge/Firefox Manifest V3 extension for claude.ai conversation sync. Communicates with daemon via `http://localhost:37780/`.
+`browser-extension/` — Chrome/Edge/Firefox Manifest V3 extension that syncs both Claude.ai and ChatGPT conversations. Communicates with daemon via `http://localhost:37780/`.
+
+**Dual sync:** Both Claude.ai and ChatGPT sync run in parallel via `Promise.allSettled` — one failing doesn't block the other. Each service has its own last-sync timestamp (`last_sync_ts` for Claude, `chatgpt_last_sync_ts` for ChatGPT).
+
+**ChatGPT API:** Uses session cookies (no API key needed) to call `https://chatgpt.com/backend-api/`:
+- `GET /backend-api/me` — login check (200 = logged in)
+- `GET /backend-api/conversations?offset=N&limit=50&order=updated` — paginated list; timestamps are Unix epoch **seconds** (multiply by 1000 for JS Date)
+- `GET /backend-api/conversation/{id}` — full conversation with `mapping` tree structure
+
+**Message tree flattening:** ChatGPT messages are a tree (`mapping` object), not a flat array. `flattenMessages()` in `chatgpt-api.js` walks root → children, deduplicating by message ID for branching conversations. Only `user` and `assistant` roles are included; non-string parts (images, tool calls) are filtered out.
+
+**Source tagging:** Each conversation posted to the daemon includes a `source` field (`"claude_ai"` or `"chatgpt"`). `BrowserExtensionListener.cs` maps this to `ConversationSource.ClaudeChat` or `ConversationSource.ChatGpt`. SQLite deduplicates by `(source, external_id)`, so same UUID from different sources = separate records.
+
+**Rate limits:** Claude = 5 RPS, ChatGPT = 3 RPS (more conservative).
 
 ### Test Projects
 

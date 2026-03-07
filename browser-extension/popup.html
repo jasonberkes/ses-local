@@ -4,9 +4,15 @@
   <meta charset="UTF-8">
   <title>ses-local</title>
   <style>
-    body { font-family: system-ui, sans-serif; width: 280px; padding: 16px; margin: 0; }
+    body { font-family: system-ui, sans-serif; width: 300px; padding: 16px; margin: 0; }
     h2 { font-size: 15px; margin: 0 0 12px; }
-    .status { font-size: 12px; color: #666; margin-bottom: 12px; }
+    .status-section { margin-bottom: 12px; }
+    .service-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: #9ca3af; }
+    .dot.green { background: #22c55e; }
+    .service-name { min-width: 72px; }
+    .service-status { color: #666; }
+    .divider { border: none; border-top: 1px solid #e5e7eb; margin: 10px 0; }
     input { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; margin-bottom: 8px; }
     button { width: 100%; padding: 7px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; background: #2563eb; color: white; }
     button:hover { background: #1d4ed8; }
@@ -18,7 +24,19 @@
 </head>
 <body>
   <h2>ses-local Sync</h2>
-  <div class="status" id="status">Loading...</div>
+  <div class="status-section">
+    <div class="service-row">
+      <span class="dot" id="claude-dot"></span>
+      <span class="service-name">Claude.ai</span>
+      <span class="service-status" id="claude-status">Checking...</span>
+    </div>
+    <div class="service-row">
+      <span class="dot" id="chatgpt-dot"></span>
+      <span class="service-name">ChatGPT</span>
+      <span class="service-status" id="chatgpt-status">Checking...</span>
+    </div>
+  </div>
+  <hr class="divider">
   <input type="password" id="pat" placeholder="ses-local PAT (tm_pat_...)" />
   <button id="save">Save PAT</button>
   <button class="secondary" id="sync">Sync Now</button>
