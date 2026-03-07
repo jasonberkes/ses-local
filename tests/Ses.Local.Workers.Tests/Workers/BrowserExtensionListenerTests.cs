@@ -170,6 +170,45 @@ public sealed class BrowserExtensionListenerTests
         Assert.Single(payload.Conversations[0].Messages);
     }
 
+    [Fact]
+    public void ExtensionPayload_WithChatGptSource_Deserializes()
+    {
+        var json = """
+            {
+              "conversations": [{
+                "uuid": "chatgpt-uuid-1",
+                "name": "ChatGPT Test",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-02T00:00:00Z",
+                "source": "chatgpt",
+                "messages": [{"uuid":"m1","sender":"human","text":"Hello","created_at":"2026-01-01T01:00:00Z"}]
+              }]
+            }
+            """;
+        var payload = JsonSerializer.Deserialize(json, ExtensionPayloadJsonContext.Default.ExtensionSyncPayload);
+        Assert.NotNull(payload);
+        Assert.Equal("chatgpt", payload.Conversations[0].Source);
+    }
+
+    [Fact]
+    public void ExtensionPayload_WithoutSource_HasNullSource()
+    {
+        var json = """
+            {
+              "conversations": [{
+                "uuid": "claude-uuid-1",
+                "name": "Claude Test",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-02T00:00:00Z",
+                "messages": []
+              }]
+            }
+            """;
+        var payload = JsonSerializer.Deserialize(json, ExtensionPayloadJsonContext.Default.ExtensionSyncPayload);
+        Assert.NotNull(payload);
+        Assert.Null(payload.Conversations[0].Source); // null → defaults to ClaudeChat via ResolveSource
+    }
+
     /// <summary>
     /// End-to-end: BrowserExtensionListener receives GET /auth/callback, stores tokens via AuthService,
     /// transitions state to Authenticated, and returns a success HTML page.
