@@ -1,4 +1,5 @@
-import { getOrgId, listConversations, getConversation } from './claude-api.js';
+import { getOrgId, listConversations as listClaudeConvs, getConversation as getClaudeConv } from './claude-api.js';
+import { isLoggedIn as isChatGptLoggedIn, listConversations as listChatGptConvs, getConversation as getChatGptConv, flattenMessages } from './chatgpt-api.js';
 import { postConversations } from './local-service.js';
 
 const ALARM_NAME = 'ses-local-sync';
@@ -12,7 +13,6 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: POLL_MINUTES });
 
   if (reason === 'install') {
-    // First install: run full bulk sync
     await runSync({ full: true });
   }
 });
@@ -44,38 +44,38 @@ async function runSync({ full }) {
     return;
   }
 
-  const orgId = await getOrgId();
-  if (!orgId) {
-    console.debug('[ses-local] Not logged in to Claude.ai or cannot get org');
-    return;
-  }
+  // Run both syncs independently — one failing does not block the other
+  const results = await Promise.allSettled([
+    syncClaude({ full, pat }),
+    syncChatGpt({ full, pat })
+  ]);
 
-  const { last_sync_ts: lastSyncTs } = await chrome.storage.local.get('last_sync_ts');
+  for (const r of results) {
+    if (r.status === 'rejected') console.warn('[ses-local] Sync failed:', r.reason);
+  }
+}
+
+// Generic sync loop shared by all sources. Each source provides:
+//   storageKey  — chrome.storage key for last sync timestamp
+//   getItems    — async generator yielding conversation metadata
+//   getCutoff   — (meta) => value accepted by new Date() for cutoff comparison
+//   getDetail   — (meta) => Promise<conv | null>
+//   transform   — (conv) => unified conversation object for the daemon
+async function syncSource({ name, storageKey, getItems, getCutoff, getDetail, transform, full, pat }) {
+  const { [storageKey]: lastSyncTs } = await chrome.storage.local.get(storageKey);
   const cutoff = full ? null : (lastSyncTs ? new Date(lastSyncTs) : new Date(Date.now() - 24 * 60 * 60 * 1000));
 
-  console.log('[ses-local] Starting sync', { full, cutoff });
+  console.log(`[ses-local] Starting ${name} sync`, { full, cutoff });
   let batch = [];
   let synced = 0;
 
-  for await (const meta of listConversations(orgId)) {
-    // Stop if we've gone past the cutoff (list is newest-first)
-    if (cutoff && new Date(meta.updated_at) < cutoff) break;
+  for await (const meta of getItems()) {
+    if (cutoff && new Date(getCutoff(meta)) < cutoff) break;
 
-    const full_conv = await getConversation(orgId, meta.uuid);
-    if (!full_conv) continue;
+    const conv = await getDetail(meta);
+    if (!conv) continue;
 
-    batch.push({
-      uuid:       full_conv.uuid,
-      name:       full_conv.name,
-      created_at: full_conv.created_at,
-      updated_at: full_conv.updated_at,
-      messages:   (full_conv.chat_messages ?? []).map(m => ({
-        uuid:       m.uuid,
-        sender:     m.sender,
-        text:       m.text ?? '',
-        created_at: m.created_at
-      }))
-    });
+    batch.push(transform(conv));
 
     if (batch.length >= BATCH_SIZE) {
       await postConversations(batch, pat);
@@ -89,14 +89,76 @@ async function runSync({ full }) {
     synced += batch.length;
   }
 
-  await chrome.storage.local.set({ last_sync_ts: new Date().toISOString() });
-  console.log('[ses-local] Sync complete —', synced, 'conversations');
+  await chrome.storage.local.set({ [storageKey]: new Date().toISOString() });
+  console.log(`[ses-local] ${name} sync complete —`, synced, 'conversations');
+}
+
+async function syncClaude({ full, pat }) {
+  const orgId = await getOrgId();
+  if (!orgId) {
+    console.debug('[ses-local] Not logged in to Claude.ai or cannot get org');
+    return;
+  }
+
+  await syncSource({
+    name:       'Claude',
+    storageKey: 'last_sync_ts',
+    getItems:   () => listClaudeConvs(orgId),
+    getCutoff:  meta => meta.updated_at,
+    getDetail:  meta => getClaudeConv(orgId, meta.uuid),
+    transform:  conv => ({
+      uuid:       conv.uuid,
+      name:       conv.name,
+      created_at: conv.created_at,
+      updated_at: conv.updated_at,
+      source:     'claude_ai',
+      messages:   (conv.chat_messages ?? []).map(m => ({
+        uuid:       m.uuid,
+        sender:     m.sender,
+        text:       m.text ?? '',
+        created_at: m.created_at
+      }))
+    }),
+    full,
+    pat
+  });
+}
+
+async function syncChatGpt({ full, pat }) {
+  if (!await isChatGptLoggedIn()) {
+    console.debug('[ses-local] Not logged in to ChatGPT — skipping');
+    return;
+  }
+
+  await syncSource({
+    name:       'ChatGPT',
+    storageKey: 'chatgpt_last_sync_ts',
+    getItems:   listChatGptConvs,
+    getCutoff:  meta => meta.update_time * 1000, // ChatGPT timestamps are Unix epoch seconds
+    getDetail:  meta => getChatGptConv(meta.id),
+    transform:  conv => ({
+      uuid:       conv.id,
+      name:       conv.title ?? 'Untitled',
+      created_at: new Date(conv.create_time * 1000).toISOString(),
+      updated_at: new Date(conv.update_time * 1000).toISOString(),
+      source:     'chatgpt',
+      messages:   flattenMessages(conv.mapping).map(m => ({
+        uuid:       m.id,
+        sender:     m.role === 'user' ? 'human' : 'assistant',
+        text:       m.text,
+        created_at: m.create_time ? new Date(m.create_time * 1000).toISOString() : null
+      }))
+    }),
+    full,
+    pat
+  });
 }
 
 async function getStatus() {
-  const data = await chrome.storage.local.get(['ses_pat', 'last_sync_ts']);
+  const data = await chrome.storage.local.get(['ses_pat', 'last_sync_ts', 'chatgpt_last_sync_ts']);
   return {
-    hasPat:      !!data.ses_pat,
-    lastSyncTs:  data.last_sync_ts ?? null
+    hasPat:            !!data.ses_pat,
+    claudeLastSyncTs:  data.last_sync_ts ?? null,
+    chatgptLastSyncTs: data.chatgpt_last_sync_ts ?? null
   };
 }

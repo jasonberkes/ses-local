@@ -340,7 +340,7 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         ConvSyncFeatures.Add(new FeatureStatus { Name = "Claude Desktop", Key = "claude_desktop_sync", IsEnabled = true });
         ConvSyncFeatures.Add(new FeatureStatus { Name = "Claude Code",    Key = "claude_code_sync",    IsEnabled = true });
         ConvSyncFeatures.Add(new FeatureStatus { Name = "Cowork",         Key = "cowork_sync",         IsEnabled = false });
-        ConvSyncFeatures.Add(new FeatureStatus { Name = "ChatGPT Desktop", Key = "chatgpt_desktop_sync", IsEnabled = false });
+        ConvSyncFeatures.Add(new FeatureStatus { Name = "ChatGPT",         Key = "chatgpt_sync",         IsEnabled = true });
 
         MemoryFeatures.Add(new FeatureStatus { Name = "ses-mcp tools", Key = "mcp_memory_tools",  IsEnabled = true });
         MemoryFeatures.Add(new FeatureStatus { Name = "CC hooks",       Key = "cc_hooks",           IsEnabled = false });

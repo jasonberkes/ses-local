@@ -47,7 +47,19 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 
 ### Browser Extension
 
-`browser-extension/` — Chrome/Edge/Firefox Manifest V3 extension for claude.ai conversation sync. Communicates with daemon via `http://localhost:37780/`.
+`browser-extension/` — Chrome/Edge/Firefox Manifest V3 extension that syncs both Claude.ai and ChatGPT conversations. Communicates with daemon via `http://localhost:37780/`.
+
+**Claude.ai sync** (`claude-api.js`): polls `/api/organizations/{orgId}/chat_conversations` every 5 min with session cookies.
+
+**ChatGPT sync** (`chatgpt-api.js`): polls `chatgpt.com/backend-api/conversations` every 5 min with session cookies.
+- API endpoints: `GET /backend-api/conversations?offset=N&limit=50&order=updated` (list) and `GET /backend-api/conversation/{id}` (detail)
+- Timestamps are Unix epoch **seconds** — multiply by 1000 for JS `Date`
+- Conversations use a tree structure (`mapping` dict with parent/children links) — `flattenMessages()` walks the tree BFS to produce a chronological message array
+- Rate limit: 3 RPS (more conservative than Claude's 5 RPS)
+- Auth: browser session cookies sent automatically (`credentials: 'include'`) — no token storage needed
+- ChatGPT Desktop conversations are **encrypted** and cannot be read locally; browser extension is the primary sync path
+
+**ChatGPT Desktop** (`ChatGptDesktopWatcher.cs`): detects installation at `~/Library/Application Support/com.openai.chat/` (macOS) or `%LOCALAPPDATA%/Programs/ChatGPT/` (Windows), counts conversation files, and logs guidance to use Settings > Export Data for manual import. Runs every 5 min.
 
 ### Test Projects
 

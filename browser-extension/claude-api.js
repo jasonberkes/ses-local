@@ -1,16 +1,10 @@
 // Claude.ai API client for browser extension context.
 // Cookies are sent automatically by the browser (same-origin).
 
-const CLAUDE_BASE = 'https://claude.ai';
-const MAX_RPS = 5;
-let _requestQueue = Promise.resolve();
+import { createRateLimiter } from './rate-limiter.js';
 
-function rateLimited(fn) {
-  _requestQueue = _requestQueue.then(() =>
-    new Promise(resolve => setTimeout(resolve, 1000 / MAX_RPS))
-  ).then(fn);
-  return _requestQueue;
-}
+const CLAUDE_BASE = 'https://claude.ai';
+const rateLimited = createRateLimiter(5);
 
 export async function getOrgId() {
   return rateLimited(async () => {
