@@ -109,7 +109,7 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 ### Credential Store
 - Platform-specific: `MacCredentialStore` (macOS) / `WindowsCredentialStore` (Windows) / `InMemoryCredentialStore` (Linux/CI)
 
-## Background Workers (10)
+## Background Workers (11)
 
 | Worker | Purpose |
 |--------|---------|
@@ -117,12 +117,27 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 | `LevelDbWatcher` | Monitors Claude Desktop LevelDB for UUID changes |
 | `CoworkWatcher` | Cowork surface sync |
 | `ClaudeDesktopSyncWorker` | Claude Desktop conversation sync |
+| `ChatGptDesktopWatcher` | Detects ChatGPT Desktop installation, counts conversations, prompts manual export |
 | `CloudSyncWorker` | Uploads pending sessions to DocumentService |
 | `CloudPullWorker` | Downloads conversations from cloud (multi-device) |
 | `BrowserExtensionListener` | HTTP listener for browser extension |
 | `CompressionWorker` | Observation compression + embedding + cross-session linking |
 | `AutoUpdateWorker` | Checks/downloads binary updates |
 | `SesMcpManagerWorker` | ses-mcp auto-installation and updates |
+
+### ChatGPT Desktop Storage Format (investigated 2026-03-06)
+
+**Finding**: The ChatGPT macOS native app (`com.openai.chat`) stores conversations as encrypted
+binary `.data` files in `~/Library/Application Support/com.openai.chat/conversations-v3-{user-id}/`.
+The encryption key is held in the OS Keychain by the app process — **conversation content cannot be
+read by third-party code**.
+
+- `~/Library/Application Support/ChatGPT/` exists but is always empty (legacy/unused)
+- `~/Library/Application Support/com.openai.chat/` is the real data directory
+- Each conversation is `{uuid}.data` (encrypted binary, not plist/JSON)
+- `ChatGptDesktopWatcher` detects installation and counts files; content sync is not possible
+- Primary sync path remains manual export: Settings > Export Data in ChatGPT → import ZIP via ses-local
+- `ChatGptDesktopPaths` handles macOS (`com.openai.chat`) and Windows (`ChatGPT`) detection
 
 ## Build & Test
 
