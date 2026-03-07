@@ -131,4 +131,14 @@ public partial class DropdownPanel : Window
     {
         if (_vm is not null) await _vm.RestartAllMcpAsync();
     }
+
+    private async void OnToggleHooksClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is not null) await _vm.ToggleHooksAsync();
+    }
+
+    private async void OnViewLogsClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is not null) await _vm.ToggleLogsExpandedAsync();
+    }
 }

@@ -187,6 +187,41 @@ internal static class Program
             return Results.Ok(new { message = "Shutting down" });
         });
 
+        app.MapGet("/api/hooks/status", async (SesMcpManager mcpManager, ILocalDbService db) =>
+        {
+            var health       = mcpManager.GetStatus();
+            var settingsPath = SesMcpManager.GetClaudeCodeSettingsPath();
+            var hooksPath    = SesMcpManager.GetSesHooksBinaryPath();
+
+            var registered = ClaudeCodeSettings.LoadOrCreate(settingsPath).HasCorrectHooks(hooksPath);
+
+            var lastActivity = await db.GetLastHookObservationTimeAsync();
+
+            return Results.Ok(new
+            {
+                registered,
+                binaryExists = health.SesHooksInstalled,
+                lastActivity = lastActivity?.ToString("O")
+            });
+        });
+
+        app.MapGet("/api/hooks/logs", async (ILocalDbService db) =>
+        {
+            var obs = await db.GetRecentHookObservationsAsync(20);
+            return Results.Ok(obs.Select(o => new
+            {
+                timestamp = o.CreatedAt.ToString("O"),
+                toolName  = o.ToolName,
+                filePath  = o.FilePath
+            }));
+        });
+
+        app.MapPost("/api/hooks/enable", async (SesMcpManager mcpManager) =>
+        {
+            await mcpManager.CheckAndRepairClaudeCodeHooksAsync();
+            return Results.Ok(new { message = "Hooks registered" });
+        });
+
         var logger = app.Services.GetRequiredService<ILoggerFactory>()
             .CreateLogger("Ses.Local.Daemon.Program");
 

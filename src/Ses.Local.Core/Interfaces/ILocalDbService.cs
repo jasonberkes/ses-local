@@ -187,4 +187,12 @@ public interface ILocalDbService
     /// Inserts or replaces a sync_metadata key/value pair.
     /// </summary>
     Task SetSyncMetadataAsync(string key, string value, CancellationToken ct = default);
+
+    // ── Hook Activity (TRAY-3) ────────────────────────────────────────────────
+
+    /// <summary>Returns the most recent created_at timestamp from any ClaudeCode observation, or null if none.</summary>
+    Task<DateTime?> GetLastHookObservationTimeAsync(CancellationToken ct = default);
+
+    /// <summary>Returns the most recent ClaudeCode hook observations, ordered by created_at descending.</summary>
+    Task<IReadOnlyList<ConversationObservation>> GetRecentHookObservationsAsync(int limit = 20, CancellationToken ct = default);
 }

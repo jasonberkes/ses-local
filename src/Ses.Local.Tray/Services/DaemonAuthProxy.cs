@@ -174,6 +174,33 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         catch { return null; }
     }
 
+    /// <summary>Returns hooks health + last activity from the daemon's /api/hooks/status endpoint, or null if unreachable.</summary>
+    public async Task<HooksStatusResponse?> GetHooksStatusAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<HooksStatusResponse>("/api/hooks/status", s_jsonOptions, ct);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Returns the last 20 hook observations from the daemon's /api/hooks/logs endpoint, or null if unreachable.</summary>
+    public async Task<IReadOnlyList<HookLogEntry>?> GetHookLogsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<List<HookLogEntry>>("/api/hooks/logs", s_jsonOptions, ct);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Requests the daemon to register ses-hooks fresh (when _hooksDisabled was absent).</summary>
+    public async Task EnableHooksAsync(CancellationToken ct = default)
+    {
+        try { await _http.PostAsync("/api/hooks/enable", null, ct); }
+        catch { /* daemon unreachable */ }
+    }
+
     public void Dispose()
     {
         _http.Dispose();
@@ -213,4 +240,20 @@ public sealed class ImportConversationsResult
     public int MessagesImported { get; set; }
     public int Duplicates       { get; set; }
     public int Errors           { get; set; }
+}
+
+/// <summary>DTO returned by the daemon's /api/hooks/status endpoint.</summary>
+public sealed class HooksStatusResponse
+{
+    public bool      Registered   { get; set; }
+    public bool      BinaryExists { get; set; }
+    public DateTime? LastActivity { get; set; }
+}
+
+/// <summary>Single hook log entry returned by the daemon's /api/hooks/logs endpoint.</summary>
+public sealed class HookLogEntry
+{
+    public DateTime Timestamp { get; set; }
+    public string?  ToolName  { get; set; }
+    public string?  FilePath  { get; set; }
 }

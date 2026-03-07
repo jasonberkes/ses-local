@@ -210,6 +210,125 @@ public sealed class ClaudeCodeSettingsServiceTests : IDisposable
         Assert.Contains("claude-opus-4-6", json);
     }
 
+    // ── DisableHooks / EnableHooks / AreHooksDisabled ─────────────────────────
+
+    [Fact]
+    public void DisableHooks_MovesHooksToDisabledKey()
+    {
+        File.WriteAllText(_settingsPath, """
+            {
+              "hooks": {
+                "PostToolUse": [{ "hooks": [{ "type": "command", "command": "ses-hooks PostToolUse" }] }]
+              }
+            }
+            """);
+
+        var svc = Create();
+        svc.DisableHooks();
+
+        var json = File.ReadAllText(_settingsPath);
+        Assert.Contains("_hooksDisabled", json);
+        Assert.Contains("PostToolUse", json);
+        // Active hooks should be empty
+        var info = svc.ReadSettings();
+        Assert.Empty(info.RegisteredHooks);
+    }
+
+    [Fact]
+    public void DisableHooks_WhenHooksAlreadyEmpty_IsNoOp()
+    {
+        File.WriteAllText(_settingsPath, """{ "hooks": {} }""");
+
+        var svc = Create();
+        svc.DisableHooks(); // Should not throw
+
+        var json = File.ReadAllText(_settingsPath);
+        Assert.DoesNotContain("_hooksDisabled", json);
+    }
+
+    [Fact]
+    public void EnableHooks_RestoresFromDisabledKey_ReturnsTrue()
+    {
+        File.WriteAllText(_settingsPath, """
+            {
+              "hooks": {},
+              "_hooksDisabled": {
+                "PostToolUse": [{ "hooks": [{ "type": "command", "command": "ses-hooks PostToolUse" }] }]
+              }
+            }
+            """);
+
+        var svc = Create();
+        var restored = svc.EnableHooks();
+
+        Assert.True(restored);
+        var json = File.ReadAllText(_settingsPath);
+        Assert.DoesNotContain("_hooksDisabled", json);
+        var info = svc.ReadSettings();
+        Assert.Contains("PostToolUse", info.RegisteredHooks);
+    }
+
+    [Fact]
+    public void EnableHooks_WhenNoDisabledKey_ReturnsFalse()
+    {
+        File.WriteAllText(_settingsPath, """{ "hooks": {} }""");
+
+        var svc = Create();
+        var restored = svc.EnableHooks();
+
+        Assert.False(restored);
+    }
+
+    [Fact]
+    public void AreHooksDisabled_ReturnsTrueWhenDisabledKeyExists()
+    {
+        File.WriteAllText(_settingsPath, """
+            {
+              "_hooksDisabled": {
+                "PostToolUse": [{ "hooks": [{ "type": "command", "command": "ses-hooks PostToolUse" }] }]
+              }
+            }
+            """);
+
+        Assert.True(Create().AreHooksDisabled());
+    }
+
+    [Fact]
+    public void AreHooksDisabled_ReturnsFalseWhenNoDisabledKey()
+    {
+        File.WriteAllText(_settingsPath, """{ "hooks": { "PostToolUse": [] } }""");
+
+        Assert.False(Create().AreHooksDisabled());
+    }
+
+    [Fact]
+    public void DisableHooks_ThenEnableHooks_RoundtripsCorrectly()
+    {
+        File.WriteAllText(_settingsPath, """
+            {
+              "hooks": {
+                "PostToolUse": [{ "hooks": [{ "type": "command", "command": "ses-hooks PostToolUse" }] }],
+                "SessionStart": [{ "hooks": [{ "type": "command", "command": "ses-hooks SessionStart" }] }]
+              }
+            }
+            """);
+
+        var svc = Create();
+        svc.DisableHooks();
+
+        var midInfo = svc.ReadSettings();
+        Assert.Empty(midInfo.RegisteredHooks);
+        Assert.True(svc.AreHooksDisabled());
+
+        var restored = svc.EnableHooks();
+        Assert.True(restored);
+        Assert.False(svc.AreHooksDisabled());
+
+        var info = svc.ReadSettings();
+        Assert.Contains("PostToolUse", info.RegisteredHooks);
+        Assert.Contains("SessionStart", info.RegisteredHooks);
+    }
+
     // ── MergeSettings ─────────────────────────────────────────────────────────
 
     [Fact]

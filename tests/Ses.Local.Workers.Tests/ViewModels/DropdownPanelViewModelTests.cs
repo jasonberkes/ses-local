@@ -377,4 +377,68 @@ public sealed class DropdownPanelViewModelTests
 
         Assert.False(vm.IsAddFormVisible);
     }
+
+    // ── Hooks (TRAY-3) ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void HooksToggleLabel_WhenHooksRegistered_IsDisable()
+    {
+        var vm = CreateVm();
+        vm.CcHooksSummary = "SessionStart, PostToolUse"; // non-(none) → enabled
+
+        Assert.True(vm.HooksEnabled);
+        Assert.Equal("Disable", vm.HooksToggleLabel);
+    }
+
+    [Fact]
+    public void HooksToggleLabel_WhenNoHooksRegistered_IsEnable()
+    {
+        var vm = CreateVm();
+        vm.CcHooksSummary = "(none)"; // disabled
+
+        Assert.False(vm.HooksEnabled);
+        Assert.Equal("Enable", vm.HooksToggleLabel);
+    }
+
+    [Fact]
+    public void HasLastActivity_ReturnsFalseWhenEmpty()
+    {
+        var vm = CreateVm();
+        vm.HooksLastActivity = string.Empty;
+
+        Assert.False(vm.HasLastActivity);
+    }
+
+    [Fact]
+    public void HasLastActivity_ReturnsTrueWhenSet()
+    {
+        var vm = CreateVm();
+        vm.HooksLastActivity = "2 minutes ago";
+
+        Assert.True(vm.HasLastActivity);
+    }
+
+    [Fact]
+    public async Task RefreshHooksStatusAsync_WhenDaemonUnreachable_SetsGreyAndMessage()
+    {
+        var vm = CreateVm();
+        await vm.RefreshHooksStatusAsync();
+
+        Assert.Equal(StatusDot.Grey, vm.HooksStatusDot);
+        Assert.Equal("Daemon not reachable", vm.HooksStatusText);
+    }
+
+    [Fact]
+    public async Task ToggleLogsExpandedAsync_TogglesTwice_CollapsesOnSecondCall()
+    {
+        var vm = CreateVm();
+
+        // First call: daemon unreachable → logs empty but panel expands
+        await vm.ToggleLogsExpandedAsync();
+        Assert.True(vm.IsLogsExpanded);
+
+        // Second call: collapses
+        await vm.ToggleLogsExpandedAsync();
+        Assert.False(vm.IsLogsExpanded);
+    }
 }
