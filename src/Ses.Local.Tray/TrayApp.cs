@@ -160,7 +160,7 @@ public partial class TrayApp : Application
         _mcpCountItem = new NativeMenuItem("MCP Servers") { IsEnabled = false };
         ccMenu.Items.Add(_mcpCountItem);
 
-        var manageMcpItem = new NativeMenuItem("Manage MCP Servers...");
+        var manageMcpItem = new NativeMenuItem("Edit MCP Servers in settings.json...");
         manageMcpItem.Click += (_, _) => OnOpenSettingsClicked();
         ccMenu.Items.Add(manageMcpItem);
         ccMenu.Items.Add(new NativeMenuItemSeparator());
@@ -306,7 +306,7 @@ public partial class TrayApp : Application
         }
 
         // Component status
-        var components = componentsTask.Result;
+        var components = componentsTask.IsCompletedSuccessfully ? componentsTask.Result : null;
         if (components is not null)
         {
             _daemonComponentItem.Header   = $"● Daemon     {FormatVersion(components.Daemon.Version)} Running";
@@ -319,7 +319,7 @@ public partial class TrayApp : Application
         }
 
         // Import history
-        var history = importHistoryTask.Result;
+        var history = importHistoryTask.IsCompletedSuccessfully ? importHistoryTask.Result : null;
         if (history?.Count > 0)
             _lastImportItem.Header = $"Last import: {FormatAge(history[0].ImportedAt)}";
     }
@@ -390,17 +390,10 @@ public partial class TrayApp : Application
     {
         var path = _ccSettings.SettingsFilePath;
         if (!File.Exists(path)) return;
-        try
-        {
-            if (OperatingSystem.IsMacOS())
-                System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo("code", path) { UseShellExecute = true });
-            else if (OperatingSystem.IsWindows())
-                System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo("notepad", path) { UseShellExecute = true });
-        }
-        catch { /* non-fatal */ }
+        OpenFileInDefaultEditor(path);
     }
+
+    private static void OpenFileInDefaultEditor(string path) => OsOpen.Launch(path);
 
     private async Task OnToggleHooksClicked()
     {

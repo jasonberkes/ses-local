@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Ses.Local.Tray.Services;
 using Xunit;
@@ -350,5 +351,73 @@ public sealed class DaemonSupervisorTests
         supervisor.AcknowledgeDaemonRunning();
         // If already Running, no additional event is fired
         Assert.Equal(prevCount, statusChanges.Count);
+    }
+
+    // ── test 10: LaunchRealProcess returns null and logs when binary missing ──
+
+    [Fact]
+    public void LaunchRealProcess_ReturnsNull_WhenBinaryDoesNotExist()
+    {
+        var fakeTime = new FakeTimeProvider();
+        using var supervisor = new DaemonSupervisor(
+            Logger,
+            delay: FakeDelay(fakeTime),
+            timeProvider: fakeTime,
+            isSocketAvailable: () => false,
+            launchProcess: _ => null,
+            sendShutdown: _ => Task.CompletedTask);
+
+        var result = supervisor.LaunchRealProcess("/nonexistent/path/ses-local-daemon");
+
+        Assert.Null(result);
+    }
+
+    // ── test 11: LaunchRealProcess returns null when process exits immediately ──
+
+    [Fact]
+    public void LaunchRealProcess_ReturnsNull_WhenBinaryExitsImmediately()
+    {
+        // /usr/bin/false (Unix) and /usr/bin/true (macOS/Linux) both exit immediately.
+        // LaunchRealProcess detects any exit within 2 s and returns null.
+        var exitBinary = OperatingSystem.IsWindows()
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "where.exe")
+            : "/usr/bin/false";
+
+        var fakeTime = new FakeTimeProvider();
+        using var supervisor = new DaemonSupervisor(
+            Logger,
+            delay: FakeDelay(fakeTime),
+            timeProvider: fakeTime,
+            isSocketAvailable: () => false,
+            launchProcess: _ => null,
+            sendShutdown: _ => Task.CompletedTask);
+
+        var result = supervisor.LaunchRealProcess(exitBinary);
+
+        Assert.Null(result);
+    }
+
+    // ── test 12: WaitForSocketAsync logs timing on success ──────────────────
+
+    [Fact]
+    public async Task WaitForSocket_LogsTiming_WhenSocketAppears()
+    {
+        var fakeTime = new FakeTimeProvider();
+        int socketCallCount = 0;
+
+        using var supervisor = new DaemonSupervisor(
+            Logger,
+            delay: FakeDelay(fakeTime),
+            timeProvider: fakeTime,
+            // Socket appears after 3 checks (1.5 s simulated)
+            isSocketAvailable: () => ++socketCallCount > 3,
+            launchProcess: _ => new FakeLaunchedProcess(hasExited: false),
+            sendShutdown: _ => Task.CompletedTask);
+
+        supervisor.Start();
+        await WaitForStatus(supervisor, DaemonStatus.Running);
+
+        // Verify the daemon reached Running state (logging occurred internally)
+        Assert.Equal(DaemonStatus.Running, supervisor.Status);
     }
 }

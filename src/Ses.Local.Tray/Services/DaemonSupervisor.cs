@@ -36,6 +36,7 @@ public sealed class DaemonSupervisor : IDisposable
     private readonly TimeSpan _shutdownGracePeriod;
 
     private ILaunchedProcess? _process;
+    private bool _quarantineRemoved;
     private int _retryCount;
     private DateTimeOffset? _stableStart;
     private DaemonStatus _status = DaemonStatus.Stopped;
@@ -48,15 +49,15 @@ public sealed class DaemonSupervisor : IDisposable
 
     /// <summary>Production constructor — uses real process launch and socket health check.</summary>
     public DaemonSupervisor(ILogger<DaemonSupervisor> logger, DaemonAuthProxy authProxy)
-        : this(
-            logger,
-            Task.Delay,
-            TimeProvider.System,
-            DaemonSocketPath.IsAvailable,
-            LaunchRealProcess,
-            ct => authProxy.ShutdownAsync(ct),
-            TimeSpan.FromSeconds(5))
-    { }
+    {
+        _logger              = logger;
+        _delay               = Task.Delay;
+        _timeProvider        = TimeProvider.System;
+        _isSocketAvailable   = DaemonSocketPath.IsAvailable;
+        _launchProcess       = LaunchRealProcess;
+        _sendShutdown        = ct => authProxy.ShutdownAsync(ct);
+        _shutdownGracePeriod = TimeSpan.FromSeconds(5);
+    }
 
     /// <summary>Internal constructor for tests — all side-effects are injectable.</summary>
     internal DaemonSupervisor(
@@ -256,13 +257,19 @@ public sealed class DaemonSupervisor : IDisposable
 
     private async Task<bool> WaitForSocketAsync(CancellationToken ct)
     {
-        var deadline = _timeProvider.GetUtcNow() + SocketWaitTimeout;
+        var start = _timeProvider.GetUtcNow();
+        var deadline = start + SocketWaitTimeout;
         while (_timeProvider.GetUtcNow() < deadline && !ct.IsCancellationRequested)
         {
             if (_isSocketAvailable())
+            {
+                var elapsed = _timeProvider.GetUtcNow() - start;
+                _logger.LogInformation("Daemon socket available after {Seconds:F1}s", elapsed.TotalSeconds);
                 return true;
+            }
             await _delay(SocketWaitInterval, ct);
         }
+        _logger.LogWarning("Daemon socket not available after {Timeout}s", SocketWaitTimeout.TotalSeconds);
         return false;
     }
 
@@ -291,24 +298,77 @@ public sealed class DaemonSupervisor : IDisposable
         return "ses-local-daemon"; // fallback: assume on PATH
     }
 
-    private static ILaunchedProcess? LaunchRealProcess(string path)
+    internal ILaunchedProcess? LaunchRealProcess(string path)
     {
         try
         {
+            if (!File.Exists(path))
+            {
+                _logger.LogError("Daemon binary not found at {Path}", path);
+                return null;
+            }
+
+            // macOS Gatekeeper blocks unsigned downloaded binaries via quarantine flag
+            if (OperatingSystem.IsMacOS())
+                RemoveQuarantineFlag(path);
+
             var process = new Process
             {
                 StartInfo = new ProcessStartInfo(path)
                 {
-                    UseShellExecute = false,
-                    CreateNoWindow  = true,
+                    UseShellExecute     = false,
+                    CreateNoWindow      = true,
+                    WorkingDirectory    = Path.GetDirectoryName(path)!,
+                    RedirectStandardError = true,
                 },
                 EnableRaisingEvents = true,
             };
-            return process.Start() ? new RealLaunchedProcess(process) : null;
+
+            if (!process.Start())
+            {
+                _logger.LogError("Process.Start returned false for {Path}", path);
+                return null;
+            }
+
+            // Check if process exited immediately (crash on startup)
+            if (process.WaitForExit(2000))
+            {
+                var stderr = process.StandardError.ReadToEnd();
+                _logger.LogError(
+                    "Daemon exited immediately with code {ExitCode}. stderr: {StdErr}",
+                    process.ExitCode, stderr);
+                return null;
+            }
+
+            return new RealLaunchedProcess(process);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Exception launching daemon from {Path}", path);
             return null;
+        }
+    }
+
+    private void RemoveQuarantineFlag(string path)
+    {
+        if (_quarantineRemoved) return;
+        try
+        {
+            var xattr = new Process
+            {
+                StartInfo = new ProcessStartInfo("xattr", $"-d com.apple.quarantine \"{path}\"")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow  = true,
+                }
+            };
+            xattr.Start();
+            xattr.WaitForExit(3000);
+            _quarantineRemoved = true;
+        }
+        catch
+        {
+            // Quarantine flag may not exist — that's fine
         }
     }
 
