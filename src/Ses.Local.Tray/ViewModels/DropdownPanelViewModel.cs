@@ -30,6 +30,51 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     private readonly bool _ownsCcSettings;
     private readonly EventHandler _onSettingsChanged;
 
+    // ── Dashboard status properties ───────────────────────────────────────────
+    private string _daemonUptime = "—";
+    private string _totalConversationsText = "—";
+    private string _totalMessagesText = "—";
+    private string _localDbSizeText = "—";
+    private string _oldestConversationText = "—";
+    private string _newestConversationText = "—";
+    private volatile bool _syncStatsRefreshPending;
+
+    public string DaemonUptime
+    {
+        get => _daemonUptime;
+        set { _daemonUptime = value; OnPropertyChanged(); }
+    }
+
+    public string TotalConversationsText
+    {
+        get => _totalConversationsText;
+        set { _totalConversationsText = value; OnPropertyChanged(); }
+    }
+
+    public string TotalMessagesText
+    {
+        get => _totalMessagesText;
+        set { _totalMessagesText = value; OnPropertyChanged(); }
+    }
+
+    public string LocalDbSizeText
+    {
+        get => _localDbSizeText;
+        set { _localDbSizeText = value; OnPropertyChanged(); }
+    }
+
+    public string OldestConversationText
+    {
+        get => _oldestConversationText;
+        set { _oldestConversationText = value; OnPropertyChanged(); }
+    }
+
+    public string NewestConversationText
+    {
+        get => _newestConversationText;
+        set { _newestConversationText = value; OnPropertyChanged(); }
+    }
+
     // ── CC Config tab state ───────────────────────────────────────────────────
     private string _ccModelName = "default";
     private string _ccPermissionsAllow = "(none)";
@@ -327,7 +372,7 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
                 feature.IsEnabled = enabled;
         }
 
-        await Task.WhenAll(UpdateStatusAsync(ct), RefreshComponentsAsync(ct));
+        await Task.WhenAll(UpdateStatusAsync(ct), RefreshComponentsAsync(ct), RefreshSyncStatsAsync(ct));
     }
 
     /// <summary>Fetches current auth state from daemon and applies it to all UI properties.</summary>
@@ -336,12 +381,21 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             var state = await _auth.GetStateAsync(ct);
+            DaemonUptime = _daemonProxy.LastKnownUptime;
             ApplyState(state);
+
+            // Opportunistically refresh sync stats (deduplicated via volatile flag)
+            if (!_syncStatsRefreshPending)
+            {
+                _syncStatsRefreshPending = true;
+                _ = Task.Run(() => RefreshSyncStatsAsync(CancellationToken.None));
+            }
         }
         catch
         {
             StatusText     = "Daemon not running";
             StatusDotColor = StatusDot.Red;
+            DaemonUptime   = "—";
         }
     }
 
@@ -372,6 +426,80 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         UpdateFeatureDots(state.IsAuthenticated);
     }
 
+    /// <summary>Fetches sync stats from the daemon and updates dashboard properties.</summary>
+    public async Task RefreshSyncStatsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var stats = await _daemonProxy.GetSyncStatsAsync(ct);
+            if (stats is not null)
+                ApplySyncStats(stats);
+        }
+        finally
+        {
+            _syncStatsRefreshPending = false;
+        }
+    }
+
+    /// <summary>Applies fetched sync stats to feature rows and totals display properties.</summary>
+    public void ApplySyncStats(SyncStats stats)
+    {
+        // Update conversation sync feature rows with real counts + last activity
+        foreach (var f in ConvSyncFeatures)
+        {
+            if (f.IsComingSoon) continue;
+
+            var surface = f.Key switch
+            {
+                "claude_ai_sync"      => stats.ClaudeChat,
+                "claude_desktop_sync" => stats.ClaudeChat,
+                "claude_code_sync"    => stats.ClaudeCode,
+                "cowork_sync"         => stats.Cowork,
+                _                    => null
+            };
+
+            if (surface is not null)
+                f.LastActivity = FormatSurfaceStats(surface, f.IsEnabled);
+        }
+
+        // Totals
+        TotalConversationsText = stats.TotalConversations.ToString("N0") + " conversations";
+        TotalMessagesText      = stats.TotalMessages.ToString("N0") + " messages";
+        LocalDbSizeText        = FormatBytes(stats.LocalDbSizeBytes);
+        OldestConversationText = stats.OldestConversation.HasValue
+            ? stats.OldestConversation.Value.ToLocalTime().ToString("MMM d, yyyy")
+            : "—";
+        NewestConversationText = stats.NewestConversation.HasValue
+            ? stats.NewestConversation.Value.ToLocalTime().ToString("MMM d, yyyy")
+            : "—";
+    }
+
+    private static string FormatSurfaceStats(SurfaceStats surface, bool enabled)
+    {
+        if (!enabled) return "Disabled";
+        if (surface.Count == 0) return "No conversations synced";
+
+        var count = surface.Count.ToString("N0") + (surface.Count == 1 ? " conversation" : " conversations");
+        if (!surface.LastActivity.HasValue) return count;
+
+        var age = DateTime.UtcNow - surface.LastActivity.Value;
+        var timeStr = age.TotalSeconds < 60   ? "just now"
+                    : age.TotalMinutes < 60   ? $"{(int)age.TotalMinutes} min ago"
+                    : age.TotalHours < 24     ? $"{(int)age.TotalHours}h ago"
+                    : age.TotalDays < 7       ? $"{(int)age.TotalDays}d ago"
+                    :                            surface.LastActivity.Value.ToLocalTime().ToString("MMM d");
+
+        return $"{count} · {timeStr}";
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes <= 0) return "0 B";
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
+    }
+
     private void UpdateFeatureDots(bool isAuthenticated)
     {
         foreach (var f in _allFeatures)
@@ -382,7 +510,8 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
                     ? StatusDot.Green
                     : StatusDot.Grey;
 
-            f.LastActivity = f.IsEnabled ? "Active" : "Disabled";
+            if (!f.IsComingSoon && f.LastActivity == "Never")
+                f.LastActivity = f.IsEnabled ? "Active" : "Disabled";
         }
     }
 

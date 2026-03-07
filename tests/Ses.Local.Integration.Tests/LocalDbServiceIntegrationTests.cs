@@ -437,6 +437,73 @@ public sealed class LocalDbServiceIntegrationTests : IAsyncDisposable
         Assert.True(result.Count <= 3);
     }
 
+    // ── SyncStats (TRAY-8) ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetSyncStatsAsync_EmptyDatabase_ReturnsZeroes()
+    {
+        var stats = await _fixture.Db.GetSyncStatsAsync();
+
+        Assert.Equal(0, stats.TotalConversations);
+        Assert.Equal(0, stats.TotalMessages);
+        Assert.Equal(0, stats.ClaudeChat.Count);
+        Assert.Equal(0, stats.ClaudeCode.Count);
+        Assert.Null(stats.OldestConversation);
+        Assert.Null(stats.NewestConversation);
+    }
+
+    [Fact]
+    public async Task GetSyncStatsAsync_ReturnsCorrectCountsPerSurface()
+    {
+        await _fixture.Db.UpsertSessionAsync(MakeSession("s-cc-1", "CC session 1", ConversationSource.ClaudeCode));
+        await _fixture.Db.UpsertSessionAsync(MakeSession("s-cc-2", "CC session 2", ConversationSource.ClaudeCode));
+        await _fixture.Db.UpsertSessionAsync(MakeSession("s-chat-1", "Chat session", ConversationSource.ClaudeChat));
+
+        var stats = await _fixture.Db.GetSyncStatsAsync();
+
+        Assert.Equal(2, stats.ClaudeCode.Count);
+        Assert.Equal(1, stats.ClaudeChat.Count);
+        Assert.Equal(3, stats.TotalConversations);
+    }
+
+    [Fact]
+    public async Task GetSyncStatsAsync_CountsTotalMessages()
+    {
+        var session = MakeSession("s-msg-1", "Message count session");
+        await _fixture.Db.UpsertSessionAsync(session);
+        await _fixture.Db.UpsertMessagesAsync([
+            new ConversationMessage { SessionId = session.Id, Role = "user",      Content = "Hello",  CreatedAt = DateTime.UtcNow },
+            new ConversationMessage { SessionId = session.Id, Role = "assistant", Content = "World",  CreatedAt = DateTime.UtcNow.AddSeconds(1) }
+        ]);
+
+        var stats = await _fixture.Db.GetSyncStatsAsync();
+
+        Assert.True(stats.TotalMessages >= 2);
+    }
+
+    [Fact]
+    public async Task GetSyncStatsAsync_ReturnsOldestAndNewestDates()
+    {
+        var old  = DateTime.UtcNow.AddDays(-30);
+        var now  = DateTime.UtcNow;
+
+        var s1 = MakeSession("s-date-old", "Old session");
+        s1.CreatedAt = old;
+        s1.UpdatedAt = old;
+        await _fixture.Db.UpsertSessionAsync(s1);
+
+        var s2 = MakeSession("s-date-new", "New session");
+        s2.CreatedAt = now;
+        s2.UpdatedAt = now;
+        await _fixture.Db.UpsertSessionAsync(s2);
+
+        var stats = await _fixture.Db.GetSyncStatsAsync();
+
+        Assert.NotNull(stats.OldestConversation);
+        Assert.NotNull(stats.NewestConversation);
+        Assert.True(stats.OldestConversation <= stats.NewestConversation);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static ConversationSession MakeSession(string externalId, string title, ConversationSource source = ConversationSource.ClaudeCode) =>

@@ -1559,6 +1559,80 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         return results;
     }
 
+    // ── Dashboard Stats (TRAY-8) ──────────────────────────────────────────────
+
+    public async Task<SyncStats> GetSyncStatsAsync(CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+
+        // Per-surface: count + last activity
+        var surfaceStats = new Dictionary<string, SurfaceStats>(StringComparer.Ordinal);
+        await using var surfaceCmd = conn.CreateCommand();
+        surfaceCmd.CommandText = """
+            SELECT source, COUNT(*) AS cnt, MAX(updated_at) AS last_activity
+            FROM conv_sessions
+            WHERE excluded = 0
+            GROUP BY source
+            """;
+        await using (var reader = await surfaceCmd.ExecuteReaderAsync(ct))
+        {
+            while (await reader.ReadAsync(ct))
+            {
+                var src          = reader.GetString(0);
+                var count        = reader.GetInt32(1);
+                var lastRaw      = reader.IsDBNull(2) ? null : reader.GetString(2);
+                var lastActivity = lastRaw is null ? (DateTime?)null
+                    : DateTime.Parse(lastRaw, null, System.Globalization.DateTimeStyles.RoundtripKind);
+                surfaceStats[src] = new SurfaceStats { Count = count, LastActivity = lastActivity };
+            }
+        }
+
+        // Total message count
+        await using var msgCmd = conn.CreateCommand();
+        msgCmd.CommandText = "SELECT COUNT(*) FROM conv_messages";
+        var totalMessages = Convert.ToInt32(await msgCmd.ExecuteScalarAsync(ct) ?? 0);
+
+        // Oldest/newest conversation dates
+        DateTime? oldest = null, newest = null;
+        await using var datesCmd = conn.CreateCommand();
+        datesCmd.CommandText = "SELECT MIN(created_at), MAX(created_at) FROM conv_sessions WHERE excluded = 0";
+        await using (var reader = await datesCmd.ExecuteReaderAsync(ct))
+        {
+            if (await reader.ReadAsync(ct))
+            {
+                if (!reader.IsDBNull(0))
+                    oldest = DateTime.Parse(reader.GetString(0), null, System.Globalization.DateTimeStyles.RoundtripKind);
+                if (!reader.IsDBNull(1))
+                    newest = DateTime.Parse(reader.GetString(1), null, System.Globalization.DateTimeStyles.RoundtripKind);
+            }
+        }
+
+        // DB file size (best-effort)
+        long dbSize = 0;
+        try { dbSize = new FileInfo(_dbPath).Length; } catch { /* file may be locked or absent */ }
+
+        var total = surfaceStats.Values.Sum(s => s.Count);
+        surfaceStats.TryGetValue("ClaudeChat", out var claudeChat);
+        surfaceStats.TryGetValue("ClaudeCode", out var claudeCode);
+        surfaceStats.TryGetValue("Cowork",     out var cowork);
+        surfaceStats.TryGetValue("ChatGpt",    out var chatGpt);
+        surfaceStats.TryGetValue("Gemini",     out var gemini);
+
+        return new SyncStats
+        {
+            ClaudeChat          = claudeChat ?? new SurfaceStats(),
+            ClaudeCode          = claudeCode ?? new SurfaceStats(),
+            Cowork              = cowork     ?? new SurfaceStats(),
+            ChatGpt             = chatGpt    ?? new SurfaceStats(),
+            Gemini              = gemini     ?? new SurfaceStats(),
+            TotalConversations  = total,
+            TotalMessages       = totalMessages,
+            LocalDbSizeBytes    = dbSize,
+            OldestConversation  = oldest,
+            NewestConversation  = newest,
+        };
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_connection is not null)

@@ -195,4 +195,12 @@ public interface ILocalDbService
 
     /// <summary>Returns the most recent ClaudeCode hook observations, ordered by created_at descending.</summary>
     Task<IReadOnlyList<ConversationObservation>> GetRecentHookObservationsAsync(int limit = 20, CancellationToken ct = default);
+
+    // ── Dashboard Stats (TRAY-8) ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns aggregate sync statistics: per-surface conversation counts, last activity timestamps,
+    /// total message count, database file size, and oldest/newest conversation dates.
+    /// </summary>
+    Task<SyncStats> GetSyncStatsAsync(CancellationToken ct = default);
 }

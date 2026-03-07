@@ -181,6 +181,12 @@ internal static class Program
             });
         });
 
+        app.MapGet("/api/sync-stats", async (ILocalDbService db, HttpContext ctx) =>
+        {
+            var stats = await db.GetSyncStatsAsync(ctx.RequestAborted);
+            return Results.Ok(stats);
+        });
+
         app.MapPost("/api/shutdown", (IHostApplicationLifetime lifetime) =>
         {
             lifetime.StopApplication();
