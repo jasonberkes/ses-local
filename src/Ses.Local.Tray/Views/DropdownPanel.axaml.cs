@@ -237,20 +237,6 @@ public partial class DropdownPanel : Window
             _vm.ToggleClaudeMdRow(project);
     }
 
-    private void OnOpenInEditorClick(object? sender, RoutedEventArgs e)
-    {
-        if (_vm is null || sender is not Button btn) return;
-        if (btn.DataContext is ProjectClaudeMdViewModel project)
-            _vm.OpenClaudeMdInEditor(project);
-    }
-
-    private void OnOpenTerminalClick(object? sender, RoutedEventArgs e)
-    {
-        if (_vm is null || sender is not Button btn) return;
-        if (btn.DataContext is ProjectClaudeMdViewModel project)
-            _vm.OpenTerminalHere(project);
-    }
-
     private async void OnCopyClaudeMdPathClick(object? sender, RoutedEventArgs e)
     {
         if (_vm is null || sender is not Button btn) return;
@@ -263,5 +249,45 @@ public partial class DropdownPanel : Window
                 catch { /* clipboard unavailable */ }
             }
         }
+    }
+
+    // ── Updates (TRAY-10) ────────────────────────────────────────────────────
+
+    private async void OnCheckUpdatesClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is not null) await _vm.CheckUpdatesAsync(force: true);
+    }
+
+    private async void OnApplyUpdateClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not Button btn) return;
+        if (btn.DataContext is ComponentUpdateViewModel item)
+            await _vm.ApplyUpdateAsync(item);
+    }
+
+    // ── Active CC sessions (TRAY-10) ─────────────────────────────────────────
+
+    private void OnSessionRowClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.DataContext is ActiveSessionViewModel vm)
+            vm.IsExpanded = !vm.IsExpanded;
+    }
+
+    private void OnOpenTerminalClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        if (btn.DataContext is ProjectClaudeMdViewModel project)
+            _vm?.OpenTerminalHere(project);
+        else if (btn.DataContext is ActiveSessionViewModel session)
+            session.OpenTerminal();
+    }
+
+    private void OnOpenInEditorClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        if (btn.DataContext is ProjectClaudeMdViewModel project)
+            _vm?.OpenClaudeMdInEditor(project);
+        else if (btn.DataContext is ActiveSessionViewModel session)
+            session.OpenInEditor();
     }
 }

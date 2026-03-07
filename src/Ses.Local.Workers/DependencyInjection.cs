@@ -150,6 +150,15 @@ public static class DependencyInjection
 
         services.AddSingleton<SesMcpManager>();
 
+        // Update checker — lightweight manifest-only check (no binary downloads), 2 retries, 10s timeout
+        services.AddHttpClient<ComponentUpdateChecker>()
+        .AddStandardResilienceHandler(options =>
+        {
+            options.Retry.MaxRetryAttempts = 2;
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(10);
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(5);
+        });
+
         // Observation compression pipeline — Layer 1 (rule-based, always runs)
         services.AddSingleton<IObservationCompressor, RuleBasedCompressor>();
 
