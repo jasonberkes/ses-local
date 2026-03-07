@@ -230,4 +230,214 @@ public sealed class ClaudeCodeSettingsServiceTests : IDisposable
 
         Assert.Equal("main", result["env"]!["KEY"]!.GetValue<string>());
     }
+
+    // ── ToggleMcpServer ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void ToggleMcpServer_DisablesServer_MovesToMcpDisabled()
+    {
+        File.WriteAllText(_settingsPath, """
+            {
+              "mcpServers": {
+                "context7": { "command": "npx", "args": ["context7"] }
+              }
+            }
+            """);
+
+        var svc = Create();
+        svc.ToggleMcpServer("context7", enable: false);
+
+        var info = svc.ReadSettings();
+        var disabled = info.McpServers.FirstOrDefault(s => s.Name == "context7");
+
+        Assert.NotNull(disabled);
+        Assert.True(disabled.IsDisabled);
+        var json = File.ReadAllText(_settingsPath);
+        Assert.Contains("_mcpDisabled", json);
+        // "context7" should only appear under _mcpDisabled, not under mcpServers
+        var compact = json.Replace(" ", "").Replace("\n", "").Replace("\r", "");
+        Assert.DoesNotContain("\"mcpServers\":{\"context7\"", compact);
+    }
+
+    [Fact]
+    public void ToggleMcpServer_ReEnablesServer_MovesBackToMcpServers()
+    {
+        File.WriteAllText(_settingsPath, """
+            {
+              "mcpServers": {},
+              "_mcpDisabled": {
+                "context7": { "command": "npx", "args": ["context7"] }
+              }
+            }
+            """);
+
+        var svc = Create();
+        svc.ToggleMcpServer("context7", enable: true);
+
+        var info = svc.ReadSettings();
+        var active = info.McpServers.FirstOrDefault(s => s.Name == "context7" && !s.IsDisabled);
+
+        Assert.NotNull(active);
+        var json = File.ReadAllText(_settingsPath);
+        Assert.DoesNotContain("_mcpDisabled", json);
+    }
+
+    [Fact]
+    public void ToggleMcpServer_Disable_PreservesOtherServers()
+    {
+        File.WriteAllText(_settingsPath, """
+            {
+              "mcpServers": {
+                "ses-local": { "command": "/usr/local/bin/ses-mcp", "args": [] },
+                "context7": { "command": "npx", "args": ["context7"] }
+              }
+            }
+            """);
+
+        var svc = Create();
+        svc.ToggleMcpServer("context7", enable: false);
+
+        var info = svc.ReadSettings();
+        Assert.Contains(info.McpServers, s => s.Name == "ses-local" && !s.IsDisabled);
+        Assert.Contains(info.McpServers, s => s.Name == "context7" && s.IsDisabled);
+    }
+
+    // ── AddMcpServer ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public void AddStdioMcpServer_WritesToMcpServers()
+    {
+        File.WriteAllText(_settingsPath, "{}");
+
+        var svc = Create();
+        svc.AddStdioMcpServer("myserver", "npx", ["some-mcp-package"]);
+
+        var info = svc.ReadSettings();
+        var server = info.McpServers.FirstOrDefault(s => s.Name == "myserver");
+
+        Assert.NotNull(server);
+        Assert.Equal("stdio", server.ConnectionType);
+        Assert.Equal("npx", server.Target);
+        Assert.False(server.IsDisabled);
+    }
+
+    [Fact]
+    public void AddHttpMcpServer_WritesToMcpServers()
+    {
+        File.WriteAllText(_settingsPath, "{}");
+
+        var svc = Create();
+        svc.AddHttpMcpServer("cloud-mcp", "https://mcp.example.com");
+
+        var info = svc.ReadSettings();
+        var server = info.McpServers.FirstOrDefault(s => s.Name == "cloud-mcp");
+
+        Assert.NotNull(server);
+        Assert.Equal("http", server.ConnectionType);
+        Assert.Equal("https://mcp.example.com", server.Target);
+    }
+
+    [Fact]
+    public void AddStdioMcpServer_PreservesExistingServers()
+    {
+        File.WriteAllText(_settingsPath, """
+            { "mcpServers": { "ses-local": { "command": "/bin/ses-mcp", "args": [] } } }
+            """);
+
+        var svc = Create();
+        svc.AddStdioMcpServer("new-server", "npx", []);
+
+        var info = svc.ReadSettings();
+        Assert.Equal(2, info.McpServers.Count);
+        Assert.Contains(info.McpServers, s => s.Name == "ses-local");
+        Assert.Contains(info.McpServers, s => s.Name == "new-server");
+    }
+
+    // ── RemoveMcpServer ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void RemoveMcpServer_RemovesFromMcpServers()
+    {
+        File.WriteAllText(_settingsPath, """
+            {
+              "mcpServers": {
+                "ses-local": { "command": "/bin/ses-mcp", "args": [] },
+                "context7": { "command": "npx", "args": ["context7"] }
+              }
+            }
+            """);
+
+        var svc = Create();
+        svc.RemoveMcpServer("context7");
+
+        var info = svc.ReadSettings();
+        Assert.DoesNotContain(info.McpServers, s => s.Name == "context7");
+        Assert.Contains(info.McpServers, s => s.Name == "ses-local");
+    }
+
+    [Fact]
+    public void RemoveMcpServer_AlsoRemovesFromMcpDisabled()
+    {
+        File.WriteAllText(_settingsPath, """
+            {
+              "mcpServers": {},
+              "_mcpDisabled": { "context7": { "command": "npx", "args": [] } }
+            }
+            """);
+
+        var svc = Create();
+        svc.RemoveMcpServer("context7");
+
+        var info = svc.ReadSettings();
+        Assert.DoesNotContain(info.McpServers, s => s.Name == "context7");
+    }
+
+    // ── McpServerExists ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void McpServerExists_ReturnsTrueForActiveServer()
+    {
+        File.WriteAllText(_settingsPath, """
+            { "mcpServers": { "ses-local": { "command": "/bin/ses-mcp", "args": [] } } }
+            """);
+
+        Assert.True(Create().McpServerExists("ses-local"));
+    }
+
+    [Fact]
+    public void McpServerExists_ReturnsTrueForDisabledServer()
+    {
+        File.WriteAllText(_settingsPath, """
+            { "_mcpDisabled": { "context7": { "command": "npx", "args": [] } } }
+            """);
+
+        Assert.True(Create().McpServerExists("context7"));
+    }
+
+    [Fact]
+    public void McpServerExists_ReturnsFalseForUnknownServer()
+    {
+        File.WriteAllText(_settingsPath, "{}");
+
+        Assert.False(Create().McpServerExists("nonexistent"));
+    }
+
+    // ── ReadSettings (disabled servers) ───────────────────────────────────────
+
+    [Fact]
+    public void ReadSettings_IncludesDisabledServers_WithIsDisabledTrue()
+    {
+        File.WriteAllText(_settingsPath, """
+            {
+              "mcpServers": { "ses-local": { "command": "/bin/ses-mcp", "args": [] } },
+              "_mcpDisabled": { "context7": { "command": "npx", "args": [] } }
+            }
+            """);
+
+        var info = Create().ReadSettings();
+
+        Assert.Equal(2, info.McpServers.Count);
+        Assert.Contains(info.McpServers, s => s.Name == "ses-local"  && !s.IsDisabled);
+        Assert.Contains(info.McpServers, s => s.Name == "context7" && s.IsDisabled);
+    }
 }

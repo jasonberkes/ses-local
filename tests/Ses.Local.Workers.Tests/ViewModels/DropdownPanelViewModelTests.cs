@@ -214,4 +214,167 @@ public sealed class DropdownPanelViewModelTests
 
         Assert.All(vm.Components, c => Assert.Equal(ComponentState.Error, c.State));
     }
+
+    // ── MCP management ────────────────────────────────────────────────────────
+
+    private static DropdownPanelViewModel CreateVmWithSettings(
+        string settingsPath, string localSettingsPath)
+    {
+        var mock = new Mock<IAuthService>();
+        mock.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
+        var svc = new ClaudeCodeSettingsService(settingsPath, localSettingsPath);
+        return new DropdownPanelViewModel(mock.Object, s_fakeProxy,
+            Options.Create(new SesLocalOptions()), ccSettings: svc);
+    }
+
+    [Fact]
+    public void ConfirmAddServer_Stdio_AddsServerToCollection()
+    {
+        var dir  = Path.Combine(Path.GetTempPath(), $"vm-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var settings = Path.Combine(dir, "settings.json");
+        var local    = Path.Combine(dir, "settings.local.json");
+        File.WriteAllText(settings, "{}");
+
+        try
+        {
+            var vm = CreateVmWithSettings(settings, local);
+            vm.AddName    = "myserver";
+            vm.AddIsStdio = true;
+            vm.AddCommand = "npx";
+            vm.AddArgs    = "some-pkg";
+
+            vm.ConfirmAddServer();
+
+            var json = File.ReadAllText(settings);
+            Assert.Contains("myserver", json);
+            Assert.Contains("npx", json);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void ConfirmAddServer_EmptyName_SetsValidationError()
+    {
+        var vm = CreateVm();
+        vm.AddName    = "  ";
+        vm.AddIsStdio = true;
+        vm.AddCommand = "npx";
+
+        vm.ConfirmAddServer();
+
+        Assert.True(vm.HasAddValidationError);
+        Assert.False(string.IsNullOrEmpty(vm.AddValidationError));
+    }
+
+    [Fact]
+    public void ConfirmAddServer_EmptyCommand_SetsValidationError()
+    {
+        var dir  = Path.Combine(Path.GetTempPath(), $"vm-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var settings = Path.Combine(dir, "settings.json");
+        var local    = Path.Combine(dir, "settings.local.json");
+        File.WriteAllText(settings, "{}");
+
+        try
+        {
+            var vm = CreateVmWithSettings(settings, local);
+            vm.AddName    = "myserver";
+            vm.AddIsStdio = true;
+            vm.AddCommand = "";
+
+            vm.ConfirmAddServer();
+
+            Assert.True(vm.HasAddValidationError);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void ConfirmAddServer_DuplicateName_SetsValidationError()
+    {
+        var dir  = Path.Combine(Path.GetTempPath(), $"vm-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var settings = Path.Combine(dir, "settings.json");
+        var local    = Path.Combine(dir, "settings.local.json");
+        File.WriteAllText(settings, """
+            { "mcpServers": { "existing": { "command": "npx", "args": [] } } }
+            """);
+
+        try
+        {
+            var vm = CreateVmWithSettings(settings, local);
+            vm.AddName    = "existing";
+            vm.AddIsStdio = true;
+            vm.AddCommand = "npx";
+
+            vm.ConfirmAddServer();
+
+            Assert.True(vm.HasAddValidationError);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void ConfirmRemoveMcpServer_RemovesFromCollectionAndFile()
+    {
+        var dir  = Path.Combine(Path.GetTempPath(), $"vm-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var settings = Path.Combine(dir, "settings.json");
+        var local    = Path.Combine(dir, "settings.local.json");
+        File.WriteAllText(settings, """
+            { "mcpServers": { "context7": { "command": "npx", "args": ["context7"] } } }
+            """);
+
+        try
+        {
+            var vm = CreateVmWithSettings(settings, local);
+            vm.SelectTab(PanelTab.CcConfig);
+
+            var server = vm.CcMcpServers.First(s => s.Name == "context7");
+            vm.ConfirmRemoveMcpServer(server);
+
+            Assert.DoesNotContain(vm.CcMcpServers, s => s.Name == "context7");
+            var json = File.ReadAllText(settings);
+            Assert.DoesNotContain("context7", json);
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void RequestRemoveMcpServer_ProtectedServer_DoesNothing()
+    {
+        var vm     = CreateVm();
+        var server = new McpServerViewModel(
+            new Ses.Local.Tray.Services.McpServerInfo("ses-local", "stdio", "/bin/ses-mcp", true));
+
+        vm.RequestRemoveMcpServer(server);
+
+        Assert.False(server.ShowRemoveConfirm);
+    }
+
+    [Fact]
+    public void ShowAddForm_ResetsFormFields()
+    {
+        var vm = CreateVm();
+        vm.AddName    = "old";
+        vm.AddCommand = "old-cmd";
+
+        vm.ShowAddForm();
+
+        Assert.Empty(vm.AddName);
+        Assert.Empty(vm.AddCommand);
+        Assert.True(vm.IsAddFormVisible);
+    }
+
+    [Fact]
+    public void CancelAddForm_HidesForm()
+    {
+        var vm = CreateVm();
+        vm.ShowAddForm();
+
+        vm.CancelAddForm();
+
+        Assert.False(vm.IsAddFormVisible);
+    }
 }

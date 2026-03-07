@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
@@ -25,7 +26,9 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     private FeatureStatus[] _allFeatures = [];
     private SesConfig? _config;
     private readonly ClaudeCodeSettingsService _ccSettings;
+    private readonly ClaudeDesktopConfigService _desktopSettings;
     private readonly bool _ownsCcSettings;
+    private readonly EventHandler _onSettingsChanged;
 
     // ── CC Config tab state ───────────────────────────────────────────────────
     private string _ccModelName = "default";
@@ -34,6 +37,17 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     private string _ccSettingsFileAge = "—";
     private string _ccLocalSettingsFileAge = "—";
     private string _ccHooksSummary = "(none)";
+
+    // ── MCP management state ──────────────────────────────────────────────────
+    private bool _isAddFormVisible;
+    private bool _addIsStdio = true;
+    private string _addName = "";
+    private string _addCommand = "";
+    private string _addArgs = "";
+    private string _addUrl = "";
+    private string _addValidationError = "";
+    private string _restartStatus = "";
+    private bool _isRestarting;
 
     public string CcModelName
     {
@@ -71,8 +85,71 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         set { _ccHooksSummary = value; OnPropertyChanged(); }
     }
 
-    public ObservableCollection<McpServerInfo> CcMcpServers { get; } = [];
+    public ObservableCollection<McpServerViewModel> CcMcpServers      { get; } = [];
+    public ObservableCollection<McpServerViewModel> DesktopMcpServers { get; } = [];
     public string[] CcAvailableModels { get; } = ClaudeCodeSettingsService.CommonModels;
+
+    // ── MCP add-form properties ───────────────────────────────────────────────
+
+    public bool IsAddFormVisible
+    {
+        get => _isAddFormVisible;
+        set { _isAddFormVisible = value; OnPropertyChanged(); }
+    }
+
+    public bool AddIsStdio
+    {
+        get => _addIsStdio;
+        set { _addIsStdio = value; OnPropertyChanged(); OnPropertyChanged(nameof(AddIsHttp)); }
+    }
+
+    public bool AddIsHttp => !_addIsStdio;
+
+    public string AddName
+    {
+        get => _addName;
+        set { _addName = value; OnPropertyChanged(); }
+    }
+
+    public string AddCommand
+    {
+        get => _addCommand;
+        set { _addCommand = value; OnPropertyChanged(); }
+    }
+
+    public string AddArgs
+    {
+        get => _addArgs;
+        set { _addArgs = value; OnPropertyChanged(); }
+    }
+
+    public string AddUrl
+    {
+        get => _addUrl;
+        set { _addUrl = value; OnPropertyChanged(); }
+    }
+
+    public string AddValidationError
+    {
+        get => _addValidationError;
+        set { _addValidationError = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasAddValidationError)); }
+    }
+
+    public bool HasAddValidationError => !string.IsNullOrEmpty(_addValidationError);
+
+    public string RestartStatus
+    {
+        get => _restartStatus;
+        set { _restartStatus = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowRestartStatus)); }
+    }
+
+    public bool ShowRestartStatus => !string.IsNullOrEmpty(_restartStatus);
+
+    public bool IsRestarting
+    {
+        get => _isRestarting;
+        set { _isRestarting = value; OnPropertyChanged(); }
+    }
 
     // Direct refs to fixed component items — avoids FirstOrDefault string searches
     private ComponentStatus _daemonStatus  = null!;
@@ -131,15 +208,17 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     public string AppVersion => _appVersion;
 
     public DropdownPanelViewModel(IAuthService auth, DaemonAuthProxy daemonProxy, IOptions<SesLocalOptions> options,
-        ClaudeCodeSettingsService? ccSettings = null)
+        ClaudeCodeSettingsService? ccSettings = null, ClaudeDesktopConfigService? desktopSettings = null)
     {
         _auth            = auth;
         _daemonProxy     = daemonProxy;
         _troubleshootUrl = options.Value.DocsBaseUrl.TrimEnd('/') + "/ses-local/troubleshoot";
         _appVersion      = GetAppVersion();
-        _ownsCcSettings = ccSettings is null;
-        _ccSettings = ccSettings ?? new ClaudeCodeSettingsService();
-        _ccSettings.SettingsChanged += (_, _) => RefreshCcConfig();
+        _ownsCcSettings      = ccSettings is null;
+        _ccSettings          = ccSettings ?? new ClaudeCodeSettingsService();
+        _desktopSettings     = desktopSettings ?? new ClaudeDesktopConfigService();
+        _onSettingsChanged   = (_, _) => RefreshCcConfig();
+        _ccSettings.SettingsChanged += _onSettingsChanged;
         InitFeatures();
         InitComponents();
         _ = LoadAsync();
@@ -312,7 +391,15 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
 
             CcMcpServers.Clear();
             foreach (var s in info.McpServers)
-                CcMcpServers.Add(s);
+                CcMcpServers.Add(new McpServerViewModel(s));
+        }
+        catch { /* read error — leave existing values */ }
+
+        try
+        {
+            DesktopMcpServers.Clear();
+            foreach (var s in _desktopSettings.ReadMcpServers())
+                DesktopMcpServers.Add(new McpServerViewModel(s));
         }
         catch { /* read error — leave existing values */ }
     }
@@ -322,6 +409,113 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         if (string.IsNullOrWhiteSpace(model)) return;
         _ccSettings.WriteModelName(model);
         CcModelName = model;
+    }
+
+    // ── MCP management ────────────────────────────────────────────────────────
+
+    public void ToggleMcpServer(McpServerViewModel server)
+    {
+        _ccSettings.ToggleMcpServer(server.Name, !server.IsEnabled);
+        RefreshCcConfig();
+    }
+
+    public void RequestRemoveMcpServer(McpServerViewModel server)
+    {
+        if (server.IsProtected) return;
+        server.ShowRemoveConfirm = true;
+    }
+
+    public void CancelRemoveMcpServer(McpServerViewModel server) =>
+        server.ShowRemoveConfirm = false;
+
+    public void ConfirmRemoveMcpServer(McpServerViewModel server)
+    {
+        _ccSettings.RemoveMcpServer(server.Name);
+        CcMcpServers.Remove(server);
+    }
+
+    public void ShowAddForm()
+    {
+        AddName            = "";
+        AddCommand         = "";
+        AddArgs            = "";
+        AddUrl             = "";
+        AddIsStdio         = true;
+        AddValidationError = "";
+        IsAddFormVisible   = true;
+    }
+
+    public void CancelAddForm() => IsAddFormVisible = false;
+
+    public void ConfirmAddServer()
+    {
+        var name = AddName.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            AddValidationError = "Name is required.";
+            return;
+        }
+        if (_ccSettings.McpServerExists(name))
+        {
+            AddValidationError = $"A server named \"{name}\" already exists.";
+            return;
+        }
+
+        if (_addIsStdio)
+        {
+            var command = AddCommand.Trim();
+            if (string.IsNullOrEmpty(command))
+            {
+                AddValidationError = "Command is required for stdio servers.";
+                return;
+            }
+            var trimmedArgs = AddArgs.Trim();
+            var args = trimmedArgs.Length > 0
+                ? trimmedArgs.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                : [];
+            _ccSettings.AddStdioMcpServer(name, command, args);
+        }
+        else
+        {
+            var url = AddUrl.Trim();
+            if (string.IsNullOrEmpty(url))
+            {
+                AddValidationError = "URL is required for HTTP servers.";
+                return;
+            }
+            _ccSettings.AddHttpMcpServer(name, url);
+        }
+
+        IsAddFormVisible = false;
+        RefreshCcConfig();
+    }
+
+    public async Task RestartAllMcpAsync()
+    {
+        if (_isRestarting) return;
+        IsRestarting  = true;
+        RestartStatus = "Restarting...";
+        try
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo("/bin/sh",
+                    "-c \"pkill -f ses-mcp; pkill -f mcp-remote; pkill -f mcp-proxy; exit 0\"")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow  = true
+                });
+            }
+            catch { /* pkill not available or no processes — non-fatal */ }
+            // Give MCP processes time to exit before Claude Code restarts them.
+            await Task.Delay(3000);
+        }
+        finally
+        {
+            IsRestarting  = false;
+            RestartStatus = "";
+            RefreshCcConfig();
+        }
     }
 
     public void OpenCcSettingsFile()
@@ -334,15 +528,15 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
             if (OperatingSystem.IsMacOS())
             {
                 // Try VS Code first, fall back to TextEdit
-                var vscode = System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo("code", path) { UseShellExecute = true });
+                var vscode = Process.Start(
+                    new ProcessStartInfo("code", path) { UseShellExecute = true });
                 if (vscode is null)
-                    System.Diagnostics.Process.Start("open", $"-a TextEdit \"{path}\"");
+                    Process.Start("open", $"-a TextEdit \"{path}\"");
             }
             else if (OperatingSystem.IsWindows())
             {
-                System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo("notepad", path) { UseShellExecute = true });
+                Process.Start(
+                    new ProcessStartInfo("notepad", path) { UseShellExecute = true });
             }
         }
         catch { /* non-fatal */ }
@@ -366,9 +560,9 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         try
         {
             if (OperatingSystem.IsMacOS())
-                System.Diagnostics.Process.Start("open", url);
+                Process.Start("open", url);
             else if (OperatingSystem.IsWindows())
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         }
         catch { }
     }
@@ -381,6 +575,7 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
 
     public void Dispose()
     {
+        _ccSettings.SettingsChanged -= _onSettingsChanged;
         if (_ownsCcSettings)
             _ccSettings.Dispose();
     }

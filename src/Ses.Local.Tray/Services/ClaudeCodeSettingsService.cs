@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace Ses.Local.Tray.Services;
 
-public sealed record McpServerInfo(string Name, string ConnectionType, string Target, bool IsAvailable);
+public sealed record McpServerInfo(string Name, string ConnectionType, string Target, bool IsAvailable, bool IsDisabled = false);
 
 public sealed record ClaudeCodeSettingsInfo(
     string ModelName,
@@ -95,8 +95,81 @@ public sealed class ClaudeCodeSettingsService : IDisposable
         var env  = root["env"] as JsonObject ?? new JsonObject();
         env["ANTHROPIC_MODEL"] = model;
         root["env"] = env;
-        File.WriteAllText(_settingsPath,
-            root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        WriteJson(root);
+    }
+
+    /// <summary>Toggles an MCP server on/off by moving its config between mcpServers and _mcpDisabled.</summary>
+    public void ToggleMcpServer(string name, bool enable)
+    {
+        var root     = TryReadJson(_settingsPath) ?? new JsonObject();
+        var servers  = root["mcpServers"]  as JsonObject ?? new JsonObject();
+        var disabled = root["_mcpDisabled"] as JsonObject ?? new JsonObject();
+
+        if (enable)
+        {
+            if (disabled[name] is JsonNode entry)
+            {
+                servers[name] = entry.DeepClone();
+                disabled.Remove(name);
+            }
+        }
+        else
+        {
+            if (servers[name] is JsonNode entry)
+            {
+                disabled[name] = entry.DeepClone();
+                servers.Remove(name);
+            }
+        }
+
+        root["mcpServers"] = servers;
+        if (disabled.Count > 0)
+            root["_mcpDisabled"] = disabled;
+        else
+            root.Remove("_mcpDisabled");
+
+        WriteJson(root);
+    }
+
+    /// <summary>Adds a new stdio MCP server to mcpServers.</summary>
+    public void AddStdioMcpServer(string name, string command, string[] args)
+    {
+        var root    = TryReadJson(_settingsPath) ?? new JsonObject();
+        var servers = root["mcpServers"] as JsonObject ?? new JsonObject();
+
+        var argsArr = new JsonArray();
+        foreach (var arg in args) argsArr.Add(arg);
+
+        servers[name] = new JsonObject { ["command"] = command, ["args"] = argsArr };
+        root["mcpServers"] = servers;
+        WriteJson(root);
+    }
+
+    /// <summary>Adds a new HTTP MCP server to mcpServers.</summary>
+    public void AddHttpMcpServer(string name, string url)
+    {
+        var root    = TryReadJson(_settingsPath) ?? new JsonObject();
+        var servers = root["mcpServers"] as JsonObject ?? new JsonObject();
+        servers[name] = new JsonObject { ["url"] = url };
+        root["mcpServers"] = servers;
+        WriteJson(root);
+    }
+
+    /// <summary>Removes an MCP server from mcpServers (and _mcpDisabled if present).</summary>
+    public void RemoveMcpServer(string name)
+    {
+        var root = TryReadJson(_settingsPath) ?? new JsonObject();
+        (root["mcpServers"]   as JsonObject)?.Remove(name);
+        (root["_mcpDisabled"] as JsonObject)?.Remove(name);
+        WriteJson(root);
+    }
+
+    /// <summary>Returns true if a server name already exists in mcpServers or _mcpDisabled.</summary>
+    public bool McpServerExists(string name)
+    {
+        var root = TryReadJson(_settingsPath) ?? new JsonObject();
+        return (root["mcpServers"]   as JsonObject)?.ContainsKey(name) == true
+            || (root["_mcpDisabled"] as JsonObject)?.ContainsKey(name) == true;
     }
 
     // ── private helpers ───────────────────────────────────────────────────────
@@ -153,31 +226,41 @@ public sealed class ClaudeCodeSettingsService : IDisposable
 
     private static IReadOnlyList<McpServerInfo> GetMcpServers(JsonObject settings)
     {
-        if (settings["mcpServers"] is not JsonObject servers) return [];
-
         var result = new List<McpServerInfo>();
-        foreach (var kvp in servers)
-        {
-            if (kvp.Value is not JsonObject obj) continue;
-            string type, target;
-            if (obj["url"]?.GetValue<string>() is { Length: > 0 } url)
-            {
-                type = "http"; target = url;
-            }
-            else
-            {
-                type = "stdio"; target = obj["command"]?.GetValue<string>() ?? "";
-            }
 
-            // Stdio servers with absolute paths are checked for existence;
-            // relative/npx-style commands are assumed available.
-            var available = type == "http"
-                ? !string.IsNullOrEmpty(target)
-                : !Path.IsPathRooted(target) || File.Exists(target);
+        if (settings["mcpServers"] is JsonObject servers)
+            foreach (var kvp in servers)
+                if (ParseMcpEntry(kvp.Key, kvp.Value as JsonObject, isDisabled: false) is { } info)
+                    result.Add(info);
 
-            result.Add(new McpServerInfo(kvp.Key, type, target, available));
-        }
+        if (settings["_mcpDisabled"] is JsonObject disabled)
+            foreach (var kvp in disabled)
+                if (ParseMcpEntry(kvp.Key, kvp.Value as JsonObject, isDisabled: true) is { } info)
+                    result.Add(info);
+
         return result;
+    }
+
+    internal static McpServerInfo? ParseMcpEntry(string name, JsonObject? obj, bool isDisabled)
+    {
+        if (obj is null) return null;
+        string type, target;
+        if (obj["url"]?.GetValue<string>() is { Length: > 0 } url)
+        {
+            type = "http"; target = url;
+        }
+        else
+        {
+            type = "stdio"; target = obj["command"]?.GetValue<string>() ?? "";
+        }
+
+        // Stdio servers with absolute paths are checked for existence;
+        // relative/npx-style commands are assumed available.
+        var available = isDisabled ? false
+            : type == "http" ? !string.IsNullOrEmpty(target)
+            : !Path.IsPathRooted(target) || File.Exists(target);
+
+        return new McpServerInfo(name, type, target, available, isDisabled);
     }
 
     private static IReadOnlyList<string> GetHooks(JsonObject settings)
@@ -191,6 +274,9 @@ public sealed class ClaudeCodeSettingsService : IDisposable
         try { return File.Exists(path) ? File.GetLastWriteTime(path) : null; }
         catch { return null; }
     }
+
+    private void WriteJson(JsonObject root) =>
+        File.WriteAllText(_settingsPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
 
     public void Dispose() => _watcher?.Dispose();
 }
