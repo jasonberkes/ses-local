@@ -536,4 +536,72 @@ public sealed class DropdownPanelViewModelTests
         var config = SesConfig.Load();
         Assert.True(config.FeatureFlags.TryGetValue("claude_code_sync", out var val) && val == false);
     }
+
+    // ── Import History (TRAY-6) ────────────────────────────────────────────────
+
+    [Fact]
+    public void Constructor_ImportHistoryIsEmpty()
+    {
+        var vm = CreateVm();
+        Assert.Empty(vm.ImportHistory);
+        Assert.False(vm.HasImportHistory);
+    }
+
+    [Fact]
+    public void StartReImport_WhenFileMissing_SetsReImportMessage()
+    {
+        var vm    = CreateVm();
+        var entry = new ImportHistoryRecord
+        {
+            Source   = "claude",
+            FilePath = "/nonexistent/path/export.json",
+        };
+
+        vm.StartReImport(entry);
+
+        Assert.NotEmpty(vm.ImportReImportMessage);
+        Assert.True(vm.HasReImportMessage);
+    }
+
+    [Fact]
+    public void StartReImport_WhenFileExists_ClearsReImportMessage()
+    {
+        var tmpFile = Path.GetTempFileName();
+        try
+        {
+            var wizard = new ImportWizardViewModel(
+                (_, _) => Task.FromResult(true),
+                _ => Task.FromResult<ImportStatusResponse?>(null),
+                _ => Task.CompletedTask);
+
+            var mock = new Mock<IAuthService>();
+            mock.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
+            var vm = new DropdownPanelViewModel(mock.Object, s_fakeProxy, Options.Create(new SesLocalOptions()),
+                importWizard: wizard);
+
+            var entry = new ImportHistoryRecord { Source = "claude", FilePath = tmpFile };
+
+            vm.StartReImport(entry);
+
+            Assert.Empty(vm.ImportReImportMessage);
+            Assert.False(vm.HasReImportMessage);
+            // Wizard should be on instructions step with pre-populated file
+            Assert.True(wizard.IsInstructionsStep);
+            Assert.Equal(tmpFile, wizard.FilePath);
+        }
+        finally
+        {
+            File.Delete(tmpFile);
+        }
+    }
+
+    [Fact]
+    public void SelectTab_Import_SetsIsImportTab()
+    {
+        var vm = CreateVm();
+
+        vm.SelectTab(PanelTab.Import);
+
+        Assert.True(vm.IsImportTab);
+    }
 }
