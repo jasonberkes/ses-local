@@ -222,4 +222,46 @@ public partial class DropdownPanel : Window
 
         return files.Count > 0 ? files[0].Path.LocalPath : null;
     }
+
+    // ── CLAUDE.md viewer (TRAY-4) ─────────────────────────────────────────────
+
+    private async void OnClaudeMdRefreshClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is not null) await _vm.RefreshClaudeMdProjectsAsync();
+    }
+
+    private void OnClaudeMdRowPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_vm is null || sender is not Border border) return;
+        if (border.DataContext is ProjectClaudeMdViewModel project)
+            _vm.ToggleClaudeMdRow(project);
+    }
+
+    private void OnOpenInEditorClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not Button btn) return;
+        if (btn.DataContext is ProjectClaudeMdViewModel project)
+            _vm.OpenClaudeMdInEditor(project);
+    }
+
+    private void OnOpenTerminalClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not Button btn) return;
+        if (btn.DataContext is ProjectClaudeMdViewModel project)
+            _vm.OpenTerminalHere(project);
+    }
+
+    private async void OnCopyClaudeMdPathClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not Button btn) return;
+        if (btn.DataContext is ProjectClaudeMdViewModel project)
+        {
+            var path = project.ClaudeMdPath;
+            if (path is not null)
+            {
+                try { await (TopLevel.GetTopLevel(this)?.Clipboard?.SetTextAsync(path) ?? Task.CompletedTask); }
+                catch { /* clipboard unavailable */ }
+            }
+        }
+    }
 }

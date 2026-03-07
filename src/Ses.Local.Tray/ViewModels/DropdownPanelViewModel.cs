@@ -16,6 +16,7 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly IAuthService _auth;
     private readonly DaemonAuthProxy _daemonProxy;
+    private readonly ClaudeMdScannerService _claudeMdScanner;
     private readonly string _troubleshootUrl;
     private string _userDisplayName = "Loading...";
     private string _statusText = "Connecting...";
@@ -31,6 +32,24 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     private readonly EventHandler _onSettingsChanged;
     private readonly NotificationService? _notifService;
     private readonly EventHandler _onNotificationsChanged;
+
+    // ── CLAUDE.md Viewer (TRAY-4) ─────────────────────────────────────────────
+    private string _claudeMdSectionHeader = "PROJECTS WITH CLAUDE.md";
+    private bool _isClaudeMdRefreshing;
+
+    public string ClaudeMdSectionHeader
+    {
+        get => _claudeMdSectionHeader;
+        set { _claudeMdSectionHeader = value; OnPropertyChanged(); }
+    }
+
+    public bool IsClaudeMdRefreshing
+    {
+        get => _isClaudeMdRefreshing;
+        set { _isClaudeMdRefreshing = value; OnPropertyChanged(); }
+    }
+
+    public ObservableCollection<ProjectClaudeMdViewModel> ClaudeMdProjects { get; } = [];
 
     // ── Dashboard status properties ───────────────────────────────────────────
     private string _daemonUptime = "—";
@@ -324,10 +343,12 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     public DropdownPanelViewModel(IAuthService auth, DaemonAuthProxy daemonProxy, IOptions<SesLocalOptions> options,
         ClaudeCodeSettingsService? ccSettings = null, ClaudeDesktopConfigService? desktopSettings = null,
         ImportWizardViewModel? importWizard = null,
-        NotificationService? notifications = null)
+        NotificationService? notifications = null,
+        ClaudeMdScannerService? claudeMdScanner = null)
     {
         _auth            = auth;
         _daemonProxy     = daemonProxy;
+        _claudeMdScanner = claudeMdScanner ?? new ClaudeMdScannerService(daemonProxy);
         _troubleshootUrl = options.Value.DocsBaseUrl.TrimEnd('/') + "/ses-local/troubleshoot";
         _appVersion      = GetAppVersion();
         _ownsCcSettings      = ccSettings is null;
@@ -600,6 +621,7 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         {
             RefreshCcConfig();
             _ = RefreshHooksStatusAsync();
+            _ = RefreshClaudeMdProjectsAsync();
         }
         else if (tab == PanelTab.Import)
         {
@@ -889,31 +911,86 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public void OpenCcSettingsFile()
-    {
-        var path = _ccSettings.SettingsFilePath;
-        if (!File.Exists(path)) return;
+    // ── CLAUDE.md viewer (TRAY-4) ─────────────────────────────────────────────
 
+    /// <summary>Scans all known project directories for CLAUDE.md files and rebuilds the list.</summary>
+    public async Task RefreshClaudeMdProjectsAsync(CancellationToken ct = default)
+    {
+        if (IsClaudeMdRefreshing) return;
+        IsClaudeMdRefreshing = true;
+        try
+        {
+            var projects = await _claudeMdScanner.ScanAsync(ct);
+            ClaudeMdProjects.Clear();
+            var withFile = 0;
+            foreach (var p in projects)
+            {
+                ClaudeMdProjects.Add(new ProjectClaudeMdViewModel(p));
+                if (p.HasClaudeMd) withFile++;
+            }
+            ClaudeMdSectionHeader = withFile > 0
+                ? $"PROJECTS WITH CLAUDE.md ({withFile} found)"
+                : "PROJECTS WITH CLAUDE.md";
+        }
+        catch { /* non-fatal */ }
+        finally
+        {
+            IsClaudeMdRefreshing = false;
+        }
+    }
+
+    /// <summary>Toggles expand/collapse for a project row, loading content on first expand.</summary>
+    public void ToggleClaudeMdRow(ProjectClaudeMdViewModel project)
+    {
+        if (!project.HasClaudeMd) return;
+        project.IsExpanded = !project.IsExpanded;
+        if (project.IsExpanded)
+            project.LoadContent();
+    }
+
+    public void OpenClaudeMdInEditor(ProjectClaudeMdViewModel project)
+    {
+        if (project.ClaudeMdPath is not null)
+            OpenFileInEditor(project.ClaudeMdPath);
+    }
+
+    public void OpenTerminalHere(ProjectClaudeMdViewModel project)
+    {
+        var dir = project.ProjectPath;
+        if (!Directory.Exists(dir)) return;
+        try
+        {
+            if (OperatingSystem.IsMacOS())
+                Process.Start("open", $"-a Terminal \"{dir}\"");
+            else if (OperatingSystem.IsWindows())
+                Process.Start(new ProcessStartInfo("cmd", $"/k cd /d \"{dir}\"") { UseShellExecute = true });
+        }
+        catch { /* non-fatal */ }
+    }
+
+    public void OpenCcSettingsFile() => OpenFileInEditor(_ccSettings.SettingsFilePath);
+
+    private static void OpenFileInEditor(string path)
+    {
+        if (!File.Exists(path)) return;
         try
         {
             if (OperatingSystem.IsMacOS())
             {
                 // Try VS Code first, fall back to TextEdit
-                var vscode = Process.Start(
-                    new ProcessStartInfo("code", path) { UseShellExecute = true });
+                var vscode = Process.Start(new ProcessStartInfo("code", path) { UseShellExecute = true });
                 if (vscode is null)
                     Process.Start("open", $"-a TextEdit \"{path}\"");
             }
             else if (OperatingSystem.IsWindows())
             {
-                Process.Start(
-                    new ProcessStartInfo("notepad", path) { UseShellExecute = true });
+                Process.Start(new ProcessStartInfo("notepad", path) { UseShellExecute = true });
             }
         }
         catch { /* non-fatal */ }
     }
 
-    private static string FormatAge(DateTime? dt)
+    internal static string FormatAge(DateTime? dt)
     {
         if (dt is null) return "not found";
         var age = DateTime.Now - dt.Value;

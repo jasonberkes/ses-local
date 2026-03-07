@@ -214,4 +214,12 @@ public interface ILocalDbService
 
     /// <summary>Returns the last <paramref name="limit"/> import history records ordered by imported_at DESC.</summary>
     Task<IReadOnlyList<ImportHistoryRecord>> GetImportHistoryAsync(int limit = 20, CancellationToken ct = default);
+
+    // ── CLAUDE.md Viewer (TRAY-4) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns distinct working directory paths from Claude Code sessions by scanning
+    /// ~/.claude/projects/ JSONL files for their cwd fields.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetKnownProjectsAsync(CancellationToken ct = default);
 }

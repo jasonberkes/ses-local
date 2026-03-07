@@ -601,4 +601,123 @@ public sealed class DropdownPanelViewModelTests
 
         Assert.True(vm.IsImportTab);
     }
+
+    // ── CLAUDE.md viewer (TRAY-4) ─────────────────────────────────────────────
+
+    [Fact]
+    public void ClaudeMdProjects_InitiallyEmpty()
+    {
+        var vm = CreateVm();
+
+        Assert.Empty(vm.ClaudeMdProjects);
+    }
+
+    [Fact]
+    public async Task RefreshClaudeMdProjectsAsync_PopulatesCollection()
+    {
+        using var tempDir = new TempProjectDir();
+        File.WriteAllText(Path.Combine(tempDir.Path, "CLAUDE.md"), "# Hello");
+
+        var scanner = new TestClaudeMdScanner(tempDir.Path);
+        var vm = CreateVmWithScanner(scanner);
+
+        await vm.RefreshClaudeMdProjectsAsync();
+
+        Assert.Single(vm.ClaudeMdProjects);
+        Assert.Equal(Path.GetFileName(tempDir.Path), vm.ClaudeMdProjects[0].ProjectName);
+    }
+
+    [Fact]
+    public async Task RefreshClaudeMdProjectsAsync_UpdatesSectionHeader()
+    {
+        using var tempDir = new TempProjectDir();
+        File.WriteAllText(Path.Combine(tempDir.Path, "CLAUDE.md"), "# Hello");
+
+        var scanner = new TestClaudeMdScanner(tempDir.Path);
+        var vm = CreateVmWithScanner(scanner);
+
+        await vm.RefreshClaudeMdProjectsAsync();
+
+        Assert.Contains("1 found", vm.ClaudeMdSectionHeader);
+    }
+
+    [Fact]
+    public async Task RefreshClaudeMdProjectsAsync_WithNoClaudeMd_HeaderHasNoCount()
+    {
+        using var tempDir = new TempProjectDir();
+        // No CLAUDE.md
+
+        var scanner = new TestClaudeMdScanner(tempDir.Path);
+        var vm = CreateVmWithScanner(scanner);
+
+        await vm.RefreshClaudeMdProjectsAsync();
+
+        Assert.DoesNotContain("found", vm.ClaudeMdSectionHeader);
+    }
+
+    [Fact]
+    public void ToggleClaudeMdRow_WithClaudeMd_TogglesExpanded()
+    {
+        using var tempDir = new TempProjectDir();
+        File.WriteAllText(Path.Combine(tempDir.Path, "CLAUDE.md"), "# Hello");
+
+        var vm = CreateVm();
+        var entry = Ses.Local.Tray.Services.ClaudeMdScannerService.BuildEntry(tempDir.Path);
+        var project = new Ses.Local.Tray.ViewModels.ProjectClaudeMdViewModel(entry);
+
+        Assert.False(project.IsExpanded);
+        vm.ToggleClaudeMdRow(project);
+        Assert.True(project.IsExpanded);
+        vm.ToggleClaudeMdRow(project);
+        Assert.False(project.IsExpanded);
+    }
+
+    [Fact]
+    public void ToggleClaudeMdRow_WithoutClaudeMd_DoesNotExpand()
+    {
+        using var tempDir = new TempProjectDir();
+        // No CLAUDE.md
+
+        var vm = CreateVm();
+        var entry = Ses.Local.Tray.Services.ClaudeMdScannerService.BuildEntry(tempDir.Path);
+        var project = new Ses.Local.Tray.ViewModels.ProjectClaudeMdViewModel(entry);
+
+        vm.ToggleClaudeMdRow(project);
+
+        Assert.False(project.IsExpanded);
+    }
+
+    private static DropdownPanelViewModel CreateVmWithScanner(TestClaudeMdScanner scanner)
+    {
+        var auth = new Mock<IAuthService>();
+        auth.Setup(x => x.GetStateAsync(default)).ReturnsAsync(SesAuthState.Unauthenticated);
+        return new DropdownPanelViewModel(auth.Object, s_fakeProxy, Options.Create(new SesLocalOptions()),
+            claudeMdScanner: scanner);
+    }
+
+    /// <summary>Scanner that returns a single project from a temp directory (bypasses daemon).</summary>
+    private sealed class TestClaudeMdScanner : Ses.Local.Tray.Services.ClaudeMdScannerService
+    {
+        private readonly string _dir;
+
+        public TestClaudeMdScanner(string dir) : base(s_fakeProxy) => _dir = dir;
+
+        public override Task<IReadOnlyList<Ses.Local.Tray.Services.ProjectClaudeMd>> ScanAsync(CancellationToken ct = default)
+        {
+            IReadOnlyList<Ses.Local.Tray.Services.ProjectClaudeMd> list =
+            [
+                Ses.Local.Tray.Services.ClaudeMdScannerService.BuildEntry(_dir)
+            ];
+            return Task.FromResult(list);
+        }
+    }
+
+    private sealed class TempProjectDir : IDisposable
+    {
+        public string Path { get; } = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), $"vm-test-{Guid.NewGuid():N}");
+
+        public TempProjectDir() => Directory.CreateDirectory(Path);
+        public void Dispose() => Directory.Delete(Path, recursive: true);
+    }
 }
