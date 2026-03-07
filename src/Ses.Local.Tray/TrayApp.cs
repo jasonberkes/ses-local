@@ -30,6 +30,9 @@ public partial class TrayApp : Application
     private DispatcherTimer?    _statusTimer;
     private DaemonSupervisor?   _supervisor;
     private IClassicDesktopStyleApplicationLifetime? _desktop;
+    private TrayIcon?            _trayIcon;
+    private NotificationService  _notifications = new();
+    private TrayIconBadgeService? _badgeService;
 
     public static readonly DotColorConverter DotColorConverterInstance = new();
 
@@ -44,12 +47,13 @@ public partial class TrayApp : Application
             // Prevent window-close from triggering app exit (tray-only mode)
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-            var trayIcon = new TrayIcon
+            _badgeService = TryCreateBadgeService();
+            _trayIcon = new TrayIcon
             {
-                Icon        = TryGetTrayIcon(),
+                Icon        = _badgeService?.GetDefaultIcon(),
                 ToolTipText = "ses-local"
             };
-            trayIcon.Clicked += OnTrayIconClicked;
+            _trayIcon.Clicked += OnTrayIconClicked;
 
             var menu = new NativeMenu();
 
@@ -84,8 +88,8 @@ public partial class TrayApp : Application
             quitItem.Click += OnQuitClicked;
             menu.Items.Add(quitItem);
 
-            trayIcon.Menu = menu;
-            SetValue(TrayIcon.IconsProperty, new TrayIcons { trayIcon });
+            _trayIcon.Menu = menu;
+            SetValue(TrayIcon.IconsProperty, new TrayIcons { _trayIcon });
 
             _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
             _statusTimer.Tick += async (_, _) => await UpdateStatusAsync();
@@ -122,31 +126,43 @@ public partial class TrayApp : Application
         // Supervisor process state takes priority over auth state
         if (_supervisor is not null)
         {
+            var handled = true;
             switch (_supervisor.Status)
             {
                 case DaemonStatus.Starting:
-                    _statusItem.Header      = "↻ Starting daemon...";
-                    _signInItem!.IsVisible  = false;
-                    _licenseItem!.IsVisible = false;
-                    return;
+                    _statusItem.Header = "↻ Starting daemon...";
+                    _notifications.Dismiss(NotificationService.NotificationCategory.Daemon);
+                    break;
 
                 case DaemonStatus.Restarting:
-                    _statusItem.Header      = $"↻ Restarting daemon (attempt {_supervisor.RetryAttempt}/{DaemonSupervisor.MaxRetries})...";
-                    _signInItem!.IsVisible  = false;
-                    _licenseItem!.IsVisible = false;
-                    return;
+                    _statusItem.Header = $"↻ Restarting daemon (attempt {_supervisor.RetryAttempt}/{DaemonSupervisor.MaxRetries})...";
+                    _notifications.Dismiss(NotificationService.NotificationCategory.Daemon);
+                    break;
 
                 case DaemonStatus.Crashed:
-                    _statusItem.Header      = "✕ Daemon crashed — click Restart";
-                    _signInItem!.IsVisible  = false;
-                    _licenseItem!.IsVisible = false;
-                    return;
+                    _statusItem.Header = "✕ Daemon crashed — click Restart";
+                    _notifications.Add(NotificationService.NotificationCategory.Daemon,
+                        "Daemon crashed — click to restart",
+                        () => _ = _supervisor.RestartAsync());
+                    break;
 
                 case DaemonStatus.Stopped:
-                    _statusItem.Header      = "■ Daemon stopped";
-                    _signInItem!.IsVisible  = false;
-                    _licenseItem!.IsVisible = false;
-                    return;
+                    _statusItem.Header = "■ Daemon stopped";
+                    _notifications.Dismiss(NotificationService.NotificationCategory.Daemon);
+                    break;
+
+                default:
+                    handled = false;
+                    break;
+            }
+
+            if (handled)
+            {
+                _signInItem!.IsVisible  = false;
+                _licenseItem!.IsVisible = false;
+                _notifications.Dismiss(NotificationService.NotificationCategory.Auth);
+                UpdateTrayBadge();
+                return;
             }
         }
 
@@ -162,12 +178,14 @@ public partial class TrayApp : Application
                 _statusItem.Header      = "● Connected";
                 _signInItem!.IsVisible  = false;
                 _licenseItem!.IsVisible = false;
+                _notifications.Dismiss(NotificationService.NotificationCategory.Auth);
             }
             else if (authState.LicenseValid)
             {
                 _statusItem.Header      = "● Licensed (Tier 1)";
                 _signInItem!.IsVisible  = false;
                 _licenseItem!.IsVisible = false;
+                _notifications.Dismiss(NotificationService.NotificationCategory.Auth);
             }
             else if (authState.LoginTimedOut)
             {
@@ -175,6 +193,9 @@ public partial class TrayApp : Application
                 _signInItem!.Header     = "Sign In Again...";
                 _signInItem!.IsVisible  = true;
                 _licenseItem!.IsVisible = true;
+                _notifications.Add(NotificationService.NotificationCategory.Auth,
+                    "Login timed out — click to sign in",
+                    () => _ = auth.TriggerReauthAsync());
             }
             else if (authState.NeedsReauth)
             {
@@ -182,6 +203,9 @@ public partial class TrayApp : Application
                 _signInItem!.Header     = "Sign In Again...";
                 _signInItem!.IsVisible  = true;
                 _licenseItem!.IsVisible = true;
+                _notifications.Add(NotificationService.NotificationCategory.Auth,
+                    "Session expired — click to sign in",
+                    () => _ = auth.TriggerReauthAsync());
             }
             else
             {
@@ -189,11 +213,14 @@ public partial class TrayApp : Application
                 _signInItem!.Header     = "Sign In...";
                 _signInItem!.IsVisible  = true;
                 _licenseItem!.IsVisible = true;
+                _notifications.Dismiss(NotificationService.NotificationCategory.Auth);
 
                 // Auto-open license prompt on first run (no license, no OAuth)
                 if (_licenseWindow is null)
                     await Dispatcher.UIThread.InvokeAsync(ShowLicenseWindow);
             }
+
+            _notifications.Dismiss(NotificationService.NotificationCategory.Daemon);
         }
         catch
         {
@@ -202,9 +229,20 @@ public partial class TrayApp : Application
             _licenseItem!.IsVisible = false;
         }
 
+        UpdateTrayBadge();
+
         // Forward pre-fetched state to panel — avoids a second daemon round-trip
         if (authState is not null && _dropdownPanel is { IsVisible: true } panel)
             panel.RefreshStatus(authState);
+    }
+
+    private void UpdateTrayBadge()
+    {
+        if (_trayIcon is null || _badgeService is null) return;
+        var priority = _notifications.HighestPriority;
+        _trayIcon.Icon = priority is null
+            ? _badgeService.GetDefaultIcon()
+            : _badgeService.GetBadgedIcon(TrayIconBadgeService.GetDotColor(priority));
     }
 
     // ── daemon control menu item ──────────────────────────────────────────────
@@ -436,7 +474,7 @@ public partial class TrayApp : Application
         if (_dropdownPanel is null)
         {
             var importWizard = new ImportWizardViewModel(daemonProxy);
-            var vm = new DropdownPanelViewModel(auth, daemonProxy, opts, importWizard: importWizard);
+            var vm = new DropdownPanelViewModel(auth, daemonProxy, opts, importWizard: importWizard, notifications: _notifications);
             _dropdownPanel = new DropdownPanel(vm);
             _dropdownPanel.Closed += (_, _) => { vm.Dispose(); _dropdownPanel = null; };
         }
@@ -473,7 +511,7 @@ public partial class TrayApp : Application
         return "Claude";
     }
 
-    private static WindowIcon? TryGetTrayIcon()
+    private static TrayIconBadgeService? TryCreateBadgeService()
     {
         try
         {
@@ -483,10 +521,10 @@ public partial class TrayApp : Application
             if (resourceName is not null)
             {
                 using var stream = assembly.GetManifestResourceStream(resourceName)!;
-                return new WindowIcon(stream);
+                return TrayIconBadgeService.TryCreate(stream);
             }
         }
-        catch { /* run without icon */ }
+        catch { /* run without badge service */ }
         return null;
     }
 }
