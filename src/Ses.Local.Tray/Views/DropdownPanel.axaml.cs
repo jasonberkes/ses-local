@@ -87,4 +87,48 @@ public partial class DropdownPanel : Window
 
     private void OnOpenCcSettingsClick(object? sender, RoutedEventArgs e) =>
         _vm?.OpenCcSettingsFile();
+
+    // ── MCP server management ────────────────────────────────────────────────
+
+    private void OnMcpToggled(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not ToggleSwitch ts) return;
+        if (ts.DataContext is McpServerViewModel server)
+            _vm.ToggleMcpServer(server);
+    }
+
+    private void OnRemoveMcpClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not Button btn) return;
+        if (btn.DataContext is McpServerViewModel server)
+            _vm.RequestRemoveMcpServer(server);
+    }
+
+    private void OnCancelRemoveMcpClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not Button btn) return;
+        if (btn.DataContext is McpServerViewModel server)
+            _vm.CancelRemoveMcpServer(server);
+    }
+
+    private void OnConfirmRemoveMcpClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not Button btn) return;
+        if (btn.DataContext is McpServerViewModel server)
+            _vm.ConfirmRemoveMcpServer(server);
+    }
+
+    private void OnAddMcpServerClick(object? sender, RoutedEventArgs e) =>
+        _vm?.ShowAddForm();
+
+    private void OnCancelAddMcpClick(object? sender, RoutedEventArgs e) =>
+        _vm?.CancelAddForm();
+
+    private void OnConfirmAddMcpClick(object? sender, RoutedEventArgs e) =>
+        _vm?.ConfirmAddServer();
+
+    private async void OnRestartAllMcpClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is not null) await _vm.RestartAllMcpAsync();
+    }
 }
