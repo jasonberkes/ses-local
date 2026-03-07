@@ -34,13 +34,21 @@ Two independent binaries communicate over Unix domain socket IPC:
 - Resets retry counter after 60 s of stable running
 - On tray quit: sends `POST /api/shutdown`, waits 5 s, then kills process
 
-**Tray UI — DropdownPanel (TRAY-7)**: Left-click on the tray icon toggles a Docker Desktop-style floating dropdown panel (`DropdownPanel.axaml`):
-- Anchored below the menu bar, top-right of screen, 400 px wide, `SystemDecorations="None"`, `Topmost="True"`
-- Dismisses on click-outside (`Deactivated` event), Escape key, or clicking the tray icon again
-- Four tabs: **Status** (feature toggles), **CC Config** (placeholder, TRAY-1/2/3), **Import** (placeholder, TRAY-5), **Settings** (sign-out)
-- Right-click NativeMenu remains for quick actions (Sign In, Import, Configure MCP, Stop Daemon, Quit)
-- `DropdownPanelViewModel` uses `StatusDot` enum (not strings) for `StatusDotColor`; binds through `DotColorConverter`
-- TrayApp passes its already-fetched `SesAuthState` to `panel.RefreshStatus(state)` — avoids a second daemon round-trip per timer tick
+**Tray UI — NativeMenu only**: A single `NativeMenu` handles all tray icon interactions. The DropdownPanel window approach was removed because `TrayIcon.Clicked` does not fire reliably on macOS when a `Menu` is present.
+- One click on the tray icon shows ONE `NativeMenu` with all information and actions
+- Menu is built in `TrayApp.OnFrameworkInitializationCompleted()` and updated every 5 s by `_statusTimer`
+- Dynamic menu items (status, sync counts, model, hooks, components) are stored as fields and updated in `UpdateMenuItemsAsync()`
+- "Import Conversations..." uses an invisible helper `Window` as a `TopLevel` for the native file picker
+- "Manage MCP Servers..." and "Open settings.json" open `~/.claude/settings.json` in the system editor
+- No `DropdownPanel`, no `DropdownPanelViewModel`, no `TrayIcon.Clicked` handler
+
+**Menu structure**:
+- Status (`● Connected` / `○ Not connected`) + Uptime
+- Sync stats: Claude Desktop, Claude Code, Claude.ai, ChatGPT counts
+- **CC Config** submenu: Model info, Change Model submenu, MCP server count, Manage MCP Servers..., Hooks status, Toggle Hooks, Open settings.json
+- Import Conversations... + Last import age
+- **Components** submenu: Daemon / ses-mcp / ses-hooks status + Check for Updates
+- Sign In... (disabled when authenticated) / Stop Daemon / Quit
 
 **launchd**: Only the tray app has a launchd plist (`com.supereasysoftware.ses-local-tray.plist`).
 The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but kept for existing installs.
@@ -65,9 +73,9 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 
 | Project | Tests | Coverage |
 |---------|-------|----------|
-| `Ses.Local.Core.Tests` | 49 | Options validation, model serialization, utility services |
-| `Ses.Local.Workers.Tests` | 358 | Worker unit tests, service tests, telemetry, ViewModels, DaemonSupervisor |
-| `Ses.Local.Integration.Tests` | 33 | SQLite CRUD, vector search, JSONL parsing (real temp DB) |
+| `Ses.Local.Core.Tests` | 48 | Options validation, model serialization, utility services |
+| `Ses.Local.Workers.Tests` | 424 | Worker unit tests, service tests, telemetry, DaemonSupervisor |
+| `Ses.Local.Integration.Tests` | 55 | SQLite CRUD, vector search, JSONL parsing (real temp DB) |
 
 ## Key Patterns
 

@@ -148,6 +148,15 @@ public static class DependencyInjection
             options.TotalRequestTimeout.Timeout = TimeSpan.FromMinutes(5);
         });
 
+        // Update checker — lightweight manifest-only check (no applying)
+        services.AddHttpClient<ComponentUpdateChecker>()
+        .AddStandardResilienceHandler(options =>
+        {
+            options.Retry.MaxRetryAttempts = 2;
+            options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(10);
+            options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(30);
+        });
+
         services.AddSingleton<SesMcpManager>();
 
         // Update checker — lightweight manifest-only check (no binary downloads), 2 retries, 10s timeout
