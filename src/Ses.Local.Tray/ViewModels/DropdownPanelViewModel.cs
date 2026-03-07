@@ -29,6 +29,8 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     private readonly ClaudeDesktopConfigService _desktopSettings;
     private readonly bool _ownsCcSettings;
     private readonly EventHandler _onSettingsChanged;
+    private readonly NotificationService? _notifService;
+    private readonly EventHandler _onNotificationsChanged;
 
     // ── Dashboard status properties ───────────────────────────────────────────
     private string _daemonUptime = "—";
@@ -247,6 +249,10 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    public ObservableCollection<NotificationEntry> ActiveNotifications { get; } = [];
+
+    public bool HasNotifications => ActiveNotifications.Count > 0;
+
     public ObservableCollection<FeatureStatus> ConvSyncFeatures { get; } = [];
     public ObservableCollection<FeatureStatus> MemoryFeatures { get; } = [];
     public ObservableCollection<ComponentStatus> Components { get; } = [];
@@ -317,7 +323,8 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
 
     public DropdownPanelViewModel(IAuthService auth, DaemonAuthProxy daemonProxy, IOptions<SesLocalOptions> options,
         ClaudeCodeSettingsService? ccSettings = null, ClaudeDesktopConfigService? desktopSettings = null,
-        ImportWizardViewModel? importWizard = null)
+        ImportWizardViewModel? importWizard = null,
+        NotificationService? notifications = null)
     {
         _auth            = auth;
         _daemonProxy     = daemonProxy;
@@ -328,7 +335,14 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         _desktopSettings     = desktopSettings ?? new ClaudeDesktopConfigService();
         _onSettingsChanged   = (_, _) => RefreshCcConfig();
         _ccSettings.SettingsChanged += _onSettingsChanged;
-        ImportWizard         = importWizard;
+        ImportWizard             = importWizard;
+        _notifService            = notifications;
+        _onNotificationsChanged  = (_, _) => RefreshNotifications();
+        if (notifications is not null)
+        {
+            notifications.NotificationsChanged += _onNotificationsChanged;
+            RefreshNotifications();
+        }
         InitFeatures();
         InitComponents();
         _ = LoadAsync();
@@ -555,6 +569,21 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         // Re-derive dots from cached auth state without a daemon round-trip.
         // StatusDotColor is Green iff authenticated (Green) or licensed (Green).
         UpdateFeatureDots(StatusDotColor == StatusDot.Green);
+    }
+
+    public void DismissNotification(NotificationEntry entry) =>
+        _notifService?.Dismiss(entry.Category);
+
+    public void TriggerNotificationAction(NotificationEntry entry) =>
+        entry.Action?.Invoke();
+
+    private void RefreshNotifications()
+    {
+        ActiveNotifications.Clear();
+        if (_notifService is not null)
+            foreach (var n in _notifService.GetAll())
+                ActiveNotifications.Add(n);
+        OnPropertyChanged(nameof(HasNotifications));
     }
 
     public async Task SignOutAsync(CancellationToken ct = default)
@@ -918,6 +947,8 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     public void Dispose()
     {
         _ccSettings.SettingsChanged -= _onSettingsChanged;
+        if (_notifService is not null)
+            _notifService.NotificationsChanged -= _onNotificationsChanged;
         if (_ownsCcSettings)
             _ccSettings.Dispose();
         ImportWizard?.Dispose();

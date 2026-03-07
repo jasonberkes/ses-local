@@ -51,6 +51,22 @@ public partial class DropdownPanel : Window
     /// <summary>Applies a pre-fetched auth state — avoids a redundant daemon call.</summary>
     public void RefreshStatus(SesAuthState state) => _vm?.ApplyState(state);
 
+    // ── notifications ────────────────────────────────────────────────────────
+
+    private void OnNotificationActionClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not Button { DataContext: NotificationEntry entry }) return;
+        _vm.TriggerNotificationAction(entry);
+        e.Handled = true;
+    }
+
+    private void OnDismissNotificationClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is null || sender is not Button { DataContext: NotificationEntry entry }) return;
+        _vm.DismissNotification(entry);
+        e.Handled = true;
+    }
+
     // ── tab clicks ──────────────────────────────────────────────────────────
 
     private void OnStatusTabClick(object? sender, RoutedEventArgs e)    => _vm?.SelectTab(PanelTab.Status);

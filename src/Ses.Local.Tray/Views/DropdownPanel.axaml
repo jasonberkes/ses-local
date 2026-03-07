@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:Ses.Local.Tray.ViewModels"
+        xmlns:services="using:Ses.Local.Tray.Services"
         x:Class="Ses.Local.Tray.Views.DropdownPanel"
         Title="ses-local"
         Width="400"
@@ -108,6 +109,19 @@
       <Setter Property="CornerRadius" Value="4"/>
     </Style>
 
+    <!-- Notification row button -->
+    <Style Selector="Button.notifRow">
+      <Setter Property="Background" Value="#3D2A00"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="BorderThickness" Value="0,0,0,1"/>
+      <Setter Property="BorderBrush" Value="#5A3D00"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+    </Style>
+    <Style Selector="Button.notifRow:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#4D3400"/>
+    </Style>
+
     <!-- Secondary button -->
     <Style Selector="Button.secondaryBtn">
       <Setter Property="Background" Value="#3A3A3C"/>
@@ -136,6 +150,26 @@
           </StackPanel>
         </Grid>
       </Border>
+
+      <!-- ── Notification bar (above tabs) ─────────────────────────────── -->
+      <ItemsControl DockPanel.Dock="Top" IsVisible="{Binding HasNotifications}"
+                    ItemsSource="{Binding ActiveNotifications}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="services:NotificationEntry">
+            <Button Classes="notifRow" Click="OnNotificationActionClick" HorizontalAlignment="Stretch">
+              <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,6">
+                <TextBlock Text="{Binding Icon}" Foreground="#FF8C00"
+                           FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBlock Grid.Column="1" Text="{Binding Message}" Foreground="#FFCC88"
+                           FontSize="12" VerticalAlignment="Center" TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Column="2" Classes="iconBtn" Content="×"
+                        Click="OnDismissNotificationClick" Margin="8,0,0,0"/>
+              </Grid>
+            </Button>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
 
       <!-- ── Tab bar ────────────────────────────────────────────────────── -->
       <Border DockPanel.Dock="Top" Background="#FF252527">
