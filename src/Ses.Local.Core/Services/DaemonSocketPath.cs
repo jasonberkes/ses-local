@@ -29,12 +29,14 @@ public static class DaemonSocketPath
     /// Remove stale socket file left by a previous daemon crash.
     /// Named pipes on Windows are kernel objects and auto-clean on process exit.
     /// </summary>
-    public static void CleanupStaleSocket()
+    public static void CleanupStaleSocket() => CleanupStaleSocket(GetPath());
+
+    /// <summary>Removes a stale socket file at the given path. Overload for testability.</summary>
+    public static void CleanupStaleSocket(string path)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             return;
 
-        var path = GetPath();
         if (File.Exists(path))
             File.Delete(path);
     }

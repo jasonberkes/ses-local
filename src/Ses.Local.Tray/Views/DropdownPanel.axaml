@@ -918,6 +918,17 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
 
+            <!-- DAEMON CONTROLS -->
+            <TextBlock Text="DAEMON" Classes="sectionHeader" Margin="0,8,0,4"/>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <Button Content="Stop Daemon"
+                      FontSize="12" Background="Transparent" Foreground="#888888"
+                      BorderThickness="0" Click="OnStopDaemonClick"/>
+              <Button Content="Quit"
+                      FontSize="12" Background="Transparent" Foreground="#888888"
+                      BorderThickness="0" Click="OnQuitSettingsClick"/>
+            </StackPanel>
+
           </StackPanel>
 
           </Panel>
