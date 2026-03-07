@@ -268,6 +268,12 @@ internal static class Program
             return Results.Ok(new { message = "Hooks registered" });
         });
 
+        app.MapGet("/api/projects", async (ILocalDbService db, HttpContext ctx) =>
+        {
+            var paths = await db.GetKnownProjectsAsync(ctx.RequestAborted);
+            return Results.Ok(paths);
+        });
+
         var logger = app.Services.GetRequiredService<ILoggerFactory>()
             .CreateLogger("Ses.Local.Daemon.Program");
 

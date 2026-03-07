@@ -1715,6 +1715,50 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         return results;
     }
 
+    // ── CLAUDE.md Viewer (TRAY-4) ─────────────────────────────────────────────
+
+    public Task<IReadOnlyList<string>> GetKnownProjectsAsync(CancellationToken ct = default)
+    {
+        return Task.Run<IReadOnlyList<string>>(() =>
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var projectsRoot = Path.Combine(home, ".claude", "projects");
+            var result = new HashSet<string>(StringComparer.Ordinal);
+
+            if (!Directory.Exists(projectsRoot))
+                return [];
+
+            foreach (var projectDir in Directory.EnumerateDirectories(projectsRoot))
+            {
+                if (ct.IsCancellationRequested) break;
+                foreach (var jsonlFile in Directory.EnumerateFiles(projectDir, "*.jsonl").Take(3))
+                {
+                    if (ct.IsCancellationRequested) break;
+                    try
+                    {
+                        foreach (var line in File.ReadLines(jsonlFile).Take(15))
+                        {
+                            if (!line.Contains("\"cwd\"", StringComparison.Ordinal)) continue;
+                            using var doc = System.Text.Json.JsonDocument.Parse(line);
+                            if (doc.RootElement.TryGetProperty("cwd", out var cwdProp))
+                            {
+                                var cwd = cwdProp.GetString();
+                                if (!string.IsNullOrEmpty(cwd) && Directory.Exists(cwd))
+                                {
+                                    result.Add(cwd);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    catch { /* ignore malformed JSONL or permission errors */ }
+                }
+            }
+
+            return result.OrderBy(p => p).ToList();
+        }, ct);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_connection is not null)

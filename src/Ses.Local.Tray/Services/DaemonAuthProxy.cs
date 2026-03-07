@@ -236,6 +236,16 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         catch { return null; }
     }
 
+    /// <summary>Returns known project directories from the daemon's /api/projects endpoint, or null if unreachable.</summary>
+    public async Task<List<string>?> GetKnownProjectsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<List<string>>("/api/projects", s_jsonOptions, ct);
+        }
+        catch { return null; }
+    }
+
 
     public void Dispose()
     {
