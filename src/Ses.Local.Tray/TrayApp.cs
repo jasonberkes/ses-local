@@ -32,6 +32,9 @@ public partial class TrayApp : Application
     /// </summary>
     internal static IServiceProvider? PendingServices { get; set; }
 
+    // Last known auth state — cached by UpdateMenuItemsAsync, read by click handlers
+    private SesAuthState? _lastAuthState;
+
     // Dynamic menu items — updated every 5 s by _statusTimer
     private NativeMenuItem _statusItem           = null!;
     private NativeMenuItem _uptimeItem           = null!;
@@ -140,7 +143,7 @@ public partial class TrayApp : Application
 
         // Actions
         _signInItem = new NativeMenuItem("Sign In...");
-        _signInItem.Click += (_, _) => OnSignInClicked();
+        _signInItem.Click += (_, _) => _ = OnSignInOrOutClickedAsync();
         menu.Items.Add(_signInItem);
 
         var stopItem = new NativeMenuItem("Stop Daemon");
@@ -199,9 +202,9 @@ public partial class TrayApp : Application
     {
         var compMenu = new NativeMenu();
 
-        _daemonComponentItem   = new NativeMenuItem("● Daemon     Loading...") { IsEnabled = false };
-        _sesMcpComponentItem   = new NativeMenuItem("● ses-mcp    Loading...") { IsEnabled = false };
-        _sesHooksComponentItem = new NativeMenuItem("● ses-hooks  Loading...") { IsEnabled = false };
+        _daemonComponentItem   = new NativeMenuItem("⚪ Daemon     Loading...") { IsEnabled = false };
+        _sesMcpComponentItem   = new NativeMenuItem("⚪ ses-mcp    Loading...") { IsEnabled = false };
+        _sesHooksComponentItem = new NativeMenuItem("⚪ ses-hooks  Loading...") { IsEnabled = false };
         compMenu.Items.Add(_daemonComponentItem);
         compMenu.Items.Add(_sesMcpComponentItem);
         compMenu.Items.Add(_sesHooksComponentItem);
@@ -240,11 +243,6 @@ public partial class TrayApp : Application
                 _notifications.Dismiss(NotificationService.NotificationCategory.Auth);
             }
 
-            if (!authState.IsAuthenticated && !authState.LicenseValid &&
-                !authState.LoginTimedOut && !authState.NeedsReauth && _licenseWindow is null)
-            {
-                await Dispatcher.UIThread.InvokeAsync(ShowLicenseWindow);
-            }
         }
         catch
         {
@@ -269,25 +267,28 @@ public partial class TrayApp : Application
     private async Task UpdateMenuItemsAsync(SesAuthState? authState, CancellationToken ct)
     {
         // Auth-dependent items
+        _lastAuthState        = authState;
+        _signInItem.IsEnabled = true;
         if (authState is not null)
         {
-            _statusItem.Header = authState.IsAuthenticated                           ? "● Connected"
-                               : authState.LicenseValid                              ? "● Licensed (Tier 1)"
-                               : authState.LoginTimedOut || authState.NeedsReauth    ? "○ Session expired"
-                               :                                                       "○ Not activated";
-            _signInItem.IsEnabled = !authState.IsAuthenticated;
+            _statusItem.Header = authState.IsAuthenticated                           ? "🟢 Connected"
+                               : authState.LicenseValid                              ? "🟢 Licensed (Tier 1)"
+                               : authState.LoginTimedOut || authState.NeedsReauth    ? "🟡 Session expired"
+                               :                                                       "🔴 Not activated";
+            _signInItem.Header = authState.IsAuthenticated || authState.LicenseValid
+                ? "Sign Out"
+                : "Sign In...";
         }
         else
         {
-            _statusItem.Header    = "○ Not connected";
-            _signInItem.IsEnabled = true;
+            _statusItem.Header = "🔴 Not connected";
         }
 
         if (_services is null) return;
 
         var proxy = _services.GetRequiredService<DaemonAuthProxy>();
         var uptime = proxy.LastKnownUptime;
-        _uptimeItem.Header = string.IsNullOrEmpty(uptime) ? "" : $"Uptime: {uptime}";
+        _uptimeItem.Header = string.IsNullOrEmpty(uptime) ? "" : $"Uptime: {FormatUptime(uptime)}";
 
         // Local CC settings (fast, no IPC)
         try
@@ -312,25 +313,32 @@ public partial class TrayApp : Application
         var stats = syncStatsTask.IsCompletedSuccessfully ? syncStatsTask.Result : null;
         if (stats is not null)
         {
-            _claudeDesktopItem.Header = $"Claude Desktop   {FormatSyncCount(stats.ClaudeChat.Count, "conv")}";
-            _claudeCodeItem.Header    = $"Claude Code      {FormatSyncCount(stats.ClaudeCode.Count, "session")}";
-            _claudeAiItem.Header      = $"Claude.ai        {FormatSyncCount(stats.ClaudeChat.Count, "conv")}";
-            _chatGptItem.Header       = stats.ChatGpt.Count > 0
-                ? $"ChatGPT          {FormatSyncCount(stats.ChatGpt.Count, "conv")}"
-                : "ChatGPT          Not synced";
+            // ClaudeChat covers both Claude Desktop (LevelDB) and Claude.ai (browser extension)
+            _claudeDesktopItem.Header = stats.ClaudeChat.Count > 0
+                ? $"🟢 Claude Desktop   {FormatSyncCount(stats.ClaudeChat.Count, "conv")}"
+                : "⚪ Claude Desktop   —";
+            _claudeCodeItem.Header = stats.ClaudeCode.Count > 0
+                ? $"🟢 Claude Code      {FormatSyncCount(stats.ClaudeCode.Count, "session")}"
+                : "⚪ Claude Code      —";
+            _claudeAiItem.Header = stats.ClaudeChat.Count > 0
+                ? $"🟢 Claude.ai        {FormatSyncCount(stats.ClaudeChat.Count, "conv")}"
+                : "⚪ Claude.ai        —";
+            _chatGptItem.Header = stats.ChatGpt.Count > 0
+                ? $"🟢 ChatGPT          {FormatSyncCount(stats.ChatGpt.Count, "conv")}"
+                : "⚪ ChatGPT          —";
         }
 
         // Component status
         var components = componentsTask.IsCompletedSuccessfully ? componentsTask.Result : null;
         if (components is not null)
         {
-            _daemonComponentItem.Header   = $"● Daemon     {FormatVersion(components.Daemon.Version)} Running";
+            _daemonComponentItem.Header   = $"🟢 Daemon     {FormatVersion(components.Daemon.Version)} Running";
             _sesMcpComponentItem.Header   = components.SesMcp.Installed
-                ? $"● ses-mcp    {FormatVersion(components.SesMcp.Version)} Installed"
-                : "○ ses-mcp    Not installed";
+                ? $"🟢 ses-mcp    {FormatVersion(components.SesMcp.Version)} Installed"
+                : "🔴 ses-mcp    Not installed";
             _sesHooksComponentItem.Header = components.SesHooks.Installed
-                ? $"● ses-hooks  {FormatVersion(components.SesHooks.Version)} Registered"
-                : "○ ses-hooks  Not found";
+                ? $"🟢 ses-hooks  Registered"
+                : "⚪ ses-hooks  Not found";
         }
 
         // Import history
@@ -372,10 +380,19 @@ public partial class TrayApp : Application
 
     // ── menu action handlers ──────────────────────────────────────────────────
 
-    private void OnSignInClicked()
+    private async Task OnSignInOrOutClickedAsync()
     {
         if (_services is null) return;
-        _ = _services.GetRequiredService<IAuthService>().TriggerReauthAsync();
+        var auth = _services.GetRequiredService<IAuthService>();
+        if (_lastAuthState is { } s && (s.IsAuthenticated || s.LicenseValid))
+        {
+            await auth.SignOutAsync();
+            await UpdateStatusAsync();
+        }
+        else
+        {
+            await auth.TriggerReauthAsync();
+        }
     }
 
     private async Task OnStopDaemonClicked()
@@ -510,17 +527,29 @@ public partial class TrayApp : Application
                     : "Up to date";
 
                 if (u.Name.Contains("daemon", StringComparison.OrdinalIgnoreCase))
-                    _daemonComponentItem.Header = $"● Daemon     {info}";
+                    _daemonComponentItem.Header = $"🟢 Daemon     {info}";
                 else if (u.Name.Contains("ses-mcp", StringComparison.OrdinalIgnoreCase))
-                    _sesMcpComponentItem.Header = $"● ses-mcp    {info}";
+                    _sesMcpComponentItem.Header = $"🟢 ses-mcp    {info}";
                 else if (u.Name.Contains("ses-hooks", StringComparison.OrdinalIgnoreCase))
-                    _sesHooksComponentItem.Header = $"● ses-hooks  {info}";
+                    _sesHooksComponentItem.Header = $"🟢 ses-hooks  {info}";
             }
         }
         catch { /* non-fatal */ }
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    private static string FormatUptime(string raw)
+    {
+        if (TimeSpan.TryParse(raw, out var ts))
+        {
+            if (ts.TotalMinutes < 1) return "just started";
+            if (ts.TotalHours   < 1) return $"{(int)ts.TotalMinutes}m";
+            if (ts.TotalDays    < 1) return $"{(int)ts.TotalHours}h {ts.Minutes}m";
+            return $"{(int)ts.TotalDays}d {ts.Hours}h";
+        }
+        return raw;
+    }
 
     private static string FormatSyncCount(int count, string unit) =>
         count == 0 ? "—" : $"{count:N0} {unit}{(count == 1 ? "" : "s")}";
