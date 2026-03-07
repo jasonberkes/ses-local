@@ -1,9 +1,11 @@
 export function createRateLimiter(maxRps) {
   let queue = Promise.resolve();
   return (fn) => {
-    queue = queue.then(() =>
+    const slot = queue.then(() =>
       new Promise(resolve => setTimeout(resolve, 1000 / maxRps))
     ).then(fn);
-    return queue;
+    // Recover queue on rejection so subsequent calls aren't poisoned
+    queue = slot.catch(() => {});
+    return slot;
   };
 }
