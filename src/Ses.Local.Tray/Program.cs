@@ -43,10 +43,11 @@ internal static class Program
             })
             .Build();
 
-        var app = BuildAvaloniaApp();
-        if (app.Instance is TrayApp trayApp)
-            trayApp.SetServiceProvider(host.Services);
+        // Store services so TrayApp can access them in OnFrameworkInitializationCompleted.
+        // app.Instance is null until StartWithClassicDesktopLifetime creates the Application.
+        TrayApp.PendingServices = host.Services;
 
+        var app = BuildAvaloniaApp();
         app.StartWithClassicDesktopLifetime(args);
     }
 

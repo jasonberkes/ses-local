@@ -24,6 +24,14 @@ public partial class TrayApp : Application
     private TrayIconBadgeService? _badgeService;
     private readonly ClaudeCodeSettingsService _ccSettings = new();
 
+    /// <summary>
+    /// Set by Program.Main before StartWithClassicDesktopLifetime.
+    /// Read by OnFrameworkInitializationCompleted to wire up services.
+    /// app.Instance is null until the event loop starts, so we can't call
+    /// SetServiceProvider from Main directly.
+    /// </summary>
+    internal static IServiceProvider? PendingServices { get; set; }
+
     // Dynamic menu items — updated every 5 s by _statusTimer
     private NativeMenuItem _statusItem           = null!;
     private NativeMenuItem _uptimeItem           = null!;
@@ -63,6 +71,13 @@ public partial class TrayApp : Application
             _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
             _statusTimer.Tick += async (_, _) => await UpdateStatusAsync();
             _statusTimer.Start();
+
+            // Wire up services now that the Application instance exists
+            if (PendingServices is not null)
+            {
+                SetServiceProvider(PendingServices);
+                PendingServices = null;
+            }
         }
 
         base.OnFrameworkInitializationCompleted();
