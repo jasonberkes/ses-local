@@ -1,22 +1,40 @@
-const statusEl = document.getElementById('status');
-const patInput  = document.getElementById('pat');
-const saveBtn   = document.getElementById('save');
-const syncBtn   = document.getElementById('sync');
-const msgEl     = document.getElementById('msg');
+const patInput   = document.getElementById('pat');
+const saveBtn    = document.getElementById('save');
+const syncBtn    = document.getElementById('sync');
+const msgEl      = document.getElementById('msg');
+const claudeDot  = document.getElementById('claude-dot');
+const claudeLabel = document.getElementById('claude-label');
+const chatgptDot  = document.getElementById('chatgpt-dot');
+const chatgptLabel = document.getElementById('chatgpt-label');
+const claudeSyncTime  = document.getElementById('claude-sync-time');
+const chatgptSyncTime = document.getElementById('chatgpt-sync-time');
 
 function showMsg(text, isErr = false) {
   msgEl.textContent = text;
   msgEl.className   = isErr ? 'err' : 'msg';
 }
 
+function fmtTime(ts) {
+  return ts ? new Date(ts).toLocaleString() : 'Never';
+}
+
 async function loadStatus() {
   const res = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
-  const last = res.lastSyncTs
-    ? new Date(res.lastSyncTs).toLocaleString()
-    : 'Never';
-  statusEl.textContent = res.hasPat
-    ? `PAT configured. Last sync: ${last}`
-    : 'No PAT configured.';
+
+  if (res.hasPat) {
+    claudeLabel.textContent  = 'Claude.ai: ● Connected';
+    claudeDot.className      = 'dot dot-green';
+    chatgptLabel.textContent = 'ChatGPT: ● Connected';
+    chatgptDot.className     = 'dot dot-green';
+  } else {
+    claudeLabel.textContent  = 'Claude.ai: ○ No PAT configured';
+    claudeDot.className      = 'dot dot-grey';
+    chatgptLabel.textContent = 'ChatGPT: ○ No PAT configured';
+    chatgptDot.className     = 'dot dot-grey';
+  }
+
+  claudeSyncTime.textContent  = `Claude.ai last sync: ${fmtTime(res.claudeLastSyncTs)}`;
+  chatgptSyncTime.textContent = `ChatGPT last sync: ${fmtTime(res.chatgptLastSyncTs)}`;
 }
 
 saveBtn.addEventListener('click', async () => {

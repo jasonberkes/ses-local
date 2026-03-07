@@ -44,14 +44,14 @@ public sealed class DropdownPanelViewModelTests
         Assert.Contains("Claude Desktop", names);
         Assert.Contains("Claude Code",    names);
         Assert.Contains("Cowork",         names);
-        Assert.Contains("ChatGPT Desktop", names);
+        Assert.Contains("ChatGPT", names);
     }
 
     [Fact]
     public void ChatGptFeature_IsNotComingSoon()
     {
         var vm      = CreateVm();
-        var chatGpt = vm.ConvSyncFeatures.First(f => f.Name == "ChatGPT Desktop");
+        var chatGpt = vm.ConvSyncFeatures.First(f => f.Name == "ChatGPT");
 
         Assert.False(chatGpt.IsComingSoon);
     }
@@ -497,12 +497,12 @@ public sealed class DropdownPanelViewModelTests
     }
 
     [Fact]
-    public void ApplySyncStats_ChatGptDesktopFeature_HasCorrectKey()
+    public void ApplySyncStats_ChatGptFeature_HasCorrectKey()
     {
         var vm = CreateVm();
-        var chatGpt = vm.ConvSyncFeatures.First(f => f.Key == "chatgpt_desktop_sync");
+        var chatGpt = vm.ConvSyncFeatures.First(f => f.Key == "chatgpt_sync");
 
-        Assert.Equal("ChatGPT Desktop", chatGpt.Name);
+        Assert.Equal("ChatGPT", chatGpt.Name);
         Assert.False(chatGpt.IsComingSoon);
     }
 
