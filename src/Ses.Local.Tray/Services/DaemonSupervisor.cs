@@ -85,10 +85,29 @@ public sealed class DaemonSupervisor : IDisposable
         if (_supervisionTask is { IsCompleted: false })
             return;
 
+        // Remove stale socket left by a previous daemon crash so the supervisor
+        // always launches a fresh daemon rather than falsely detecting one running.
+        DaemonSocketPath.CleanupStaleSocket();
+
         _cts = new CancellationTokenSource();
         // Task.Run ensures the supervision loop runs on a thread pool thread,
         // so Start() returns immediately even when delay functions complete synchronously.
         _supervisionTask = Task.Run(() => RunSupervisionLoopAsync(_cts.Token));
+    }
+
+    /// <summary>
+    /// Called when the tray detects the daemon is running (via IPC) even though the
+    /// supervisor didn't start it (e.g., started manually or by a previous tray instance).
+    /// Updates internal state accordingly.
+    /// </summary>
+    public void AcknowledgeDaemonRunning()
+    {
+        if (Status != DaemonStatus.Running)
+        {
+            SetStatus(DaemonStatus.Running);
+            _retryCount  = 0;
+            _stableStart ??= _timeProvider.GetUtcNow();
+        }
     }
 
     /// <summary>

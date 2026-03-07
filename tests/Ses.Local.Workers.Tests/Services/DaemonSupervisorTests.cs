@@ -295,4 +295,60 @@ public sealed class DaemonSupervisorTests
         Assert.NotEmpty(path);
         Assert.Contains("ses-local-daemon", path);
     }
+
+    // ── test 9: AcknowledgeDaemonRunning updates status to Running ─────────────
+
+    [Fact]
+    public async Task AcknowledgeDaemonRunning_UpdatesStatusToRunning_WhenNotAlreadyRunning()
+    {
+        var fakeTime = new FakeTimeProvider();
+
+        // Start with a supervisor in Crashed state (all retries exhausted).
+        int healthCallCount = 0;
+        using var supervisor = new DaemonSupervisor(
+            Logger,
+            delay: FakeDelay(fakeTime),
+            timeProvider: fakeTime,
+            isSocketAvailable: () => healthCallCount++ == 0,
+            launchProcess: _ => null,    // always fails → Crashed
+            sendShutdown: _ => Task.CompletedTask);
+
+        supervisor.Start();
+        await WaitForStatus(supervisor, DaemonStatus.Crashed, timeoutMs: 5000);
+        Assert.Equal(3, supervisor.RetryAttempt);
+
+        // Tray IPC detects daemon is running → acknowledge
+        supervisor.AcknowledgeDaemonRunning();
+
+        Assert.Equal(DaemonStatus.Running, supervisor.Status);
+        Assert.Equal(0, supervisor.RetryAttempt);
+    }
+
+    [Fact]
+    public void AcknowledgeDaemonRunning_IsNoOp_WhenAlreadyRunning()
+    {
+        var fakeTime = new FakeTimeProvider();
+        var statusChanges = new List<DaemonStatus>();
+
+        using var supervisor = new DaemonSupervisor(
+            Logger,
+            delay: FakeDelay(fakeTime),
+            timeProvider: fakeTime,
+            isSocketAvailable: () => true,
+            launchProcess: _ => new FakeLaunchedProcess(),
+            sendShutdown: _ => Task.CompletedTask);
+
+        supervisor.StatusChanged += s => statusChanges.Add(s);
+        supervisor.Start();
+
+        // Give it a moment to reach Running
+        Thread.Sleep(50);
+
+        // Even if supervisor is mid-loop, calling Acknowledge when Running is a no-op
+        // (no StatusChanged event fired for Running→Running transition)
+        var prevCount = statusChanges.Count;
+        supervisor.AcknowledgeDaemonRunning();
+        // If already Running, no additional event is fired
+        Assert.Equal(prevCount, statusChanges.Count);
+    }
 }

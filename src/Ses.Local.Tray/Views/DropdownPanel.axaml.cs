@@ -87,10 +87,20 @@ public partial class DropdownPanel : Window
 
     private void OnTroubleshootClick(object? sender, RoutedEventArgs e) => _vm?.OpenTroubleshoot();
 
-    private void OnQuitClick(object? sender, RoutedEventArgs e) =>
-        (Avalonia.Application.Current?.ApplicationLifetime as
-         Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)
-        ?.Shutdown();
+    private async void OnQuitClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is not null) await _vm.QuitAsync();
+    }
+
+    private async void OnStopDaemonClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is not null) await _vm.StopDaemonAsync();
+    }
+
+    private async void OnQuitSettingsClick(object? sender, RoutedEventArgs e)
+    {
+        if (_vm is not null) await _vm.QuitAsync();
+    }
 
     // ── settings ────────────────────────────────────────────────────────────
 

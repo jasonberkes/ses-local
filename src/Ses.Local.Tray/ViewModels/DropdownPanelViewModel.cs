@@ -19,6 +19,8 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     private readonly DaemonAuthProxy _daemonProxy;
     private readonly ClaudeMdScannerService _claudeMdScanner;
     private readonly string _troubleshootUrl;
+    private readonly Func<Task>? _stopDaemon;
+    private readonly Func<Task>? _quitApp;
     private string _userDisplayName = "Loading...";
     private string _statusText = "Connecting...";
     private StatusDot _statusDot = StatusDot.Grey;
@@ -365,11 +367,15 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         ClaudeCodeSettingsService? ccSettings = null, ClaudeDesktopConfigService? desktopSettings = null,
         ImportWizardViewModel? importWizard = null,
         NotificationService? notifications = null,
-        ClaudeMdScannerService? claudeMdScanner = null)
+        ClaudeMdScannerService? claudeMdScanner = null,
+        Func<Task>? stopDaemon = null,
+        Func<Task>? quitApp = null)
     {
         _auth            = auth;
         _daemonProxy     = daemonProxy;
         _claudeMdScanner = claudeMdScanner ?? new ClaudeMdScannerService(daemonProxy);
+        _stopDaemon      = stopDaemon;
+        _quitApp         = quitApp;
         _troubleshootUrl = options.Value.DocsBaseUrl.TrimEnd('/') + "/ses-local/troubleshoot";
         _appVersion      = GetAppVersion();
         _ownsCcSettings      = ccSettings is null;
@@ -635,6 +641,18 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         await _auth.SignOutAsync(ct);
         UserDisplayName = "Signed out";
         await UpdateStatusAsync(ct);
+    }
+
+    public async Task StopDaemonAsync()
+    {
+        if (_stopDaemon is not null)
+            await _stopDaemon();
+    }
+
+    public async Task QuitAsync()
+    {
+        if (_quitApp is not null)
+            await _quitApp();
     }
 
     public void SelectTab(PanelTab tab)
