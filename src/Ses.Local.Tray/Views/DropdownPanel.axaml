@@ -182,6 +182,24 @@
                          Foreground="#7EC8E3" FontSize="12" TextWrapping="Wrap"/>
             </Border>
 
+            <!-- DAEMON section -->
+            <TextBlock Text="DAEMON" Classes="sectionHeader"/>
+            <Border Classes="featureRow">
+              <Grid ColumnDefinitions="Auto,*">
+                <Ellipse Classes="statusDot" VerticalAlignment="Center"
+                         Fill="{Binding StatusDotColor, Converter={StaticResource DotColorConverter}}"/>
+                <StackPanel Grid.Column="1" Orientation="Vertical">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding StatusText}" FontSize="13" Foreground="White"/>
+                    <TextBlock Text="{Binding DaemonUptime, StringFormat='Uptime: {0}'}"
+                               FontSize="11" Foreground="#888888" VerticalAlignment="Center"/>
+                  </StackPanel>
+                  <TextBlock Text="{Binding UserDisplayName}" FontSize="11" Foreground="#888888"/>
+                </StackPanel>
+              </Grid>
+            </Border>
+
+            <!-- CONVERSATION SYNC section -->
             <TextBlock Text="CONVERSATION SYNC" Classes="sectionHeader"/>
             <ItemsControl ItemsSource="{Binding ConvSyncFeatures}">
               <ItemsControl.ItemTemplate>
@@ -208,6 +226,7 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
 
+            <!-- MEMORY section -->
             <TextBlock Text="MEMORY" Classes="sectionHeader"/>
             <ItemsControl ItemsSource="{Binding MemoryFeatures}">
               <ItemsControl.ItemTemplate>
@@ -229,6 +248,26 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
 
+            <!-- TOTALS section -->
+            <TextBlock Text="TOTALS" Classes="sectionHeader"/>
+            <Border Classes="featureRow">
+              <StackPanel Orientation="Vertical" Spacing="3">
+                <TextBlock Text="{Binding TotalConversationsText}" FontSize="12" Foreground="White"/>
+                <TextBlock Text="{Binding TotalMessagesText}"      FontSize="12" Foreground="White"/>
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                  <TextBlock Text="Local DB:" FontSize="11" Foreground="#888888"/>
+                  <TextBlock Text="{Binding LocalDbSizeText}" FontSize="11" Foreground="#888888"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                  <TextBlock Text="Oldest:" FontSize="11" Foreground="#888888"/>
+                  <TextBlock Text="{Binding OldestConversationText}" FontSize="11" Foreground="#888888"/>
+                  <TextBlock Text="· Newest:" FontSize="11" Foreground="#888888"/>
+                  <TextBlock Text="{Binding NewestConversationText}" FontSize="11" Foreground="#888888"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <!-- COMPONENTS section -->
             <TextBlock Text="COMPONENTS" Classes="sectionHeader"/>
             <ItemsControl ItemsSource="{Binding Components}">
               <ItemsControl.ItemTemplate>

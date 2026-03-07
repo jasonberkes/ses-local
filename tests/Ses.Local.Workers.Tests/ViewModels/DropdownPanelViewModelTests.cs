@@ -441,4 +441,99 @@ public sealed class DropdownPanelViewModelTests
         await vm.ToggleLogsExpandedAsync();
         Assert.False(vm.IsLogsExpanded);
     }
+
+    // ── SyncStats / Dashboard (TRAY-8) ────────────────────────────────────────
+
+    [Fact]
+    public void ApplySyncStats_UpdatesFeatureRowLastActivity()
+    {
+        var vm = CreateVm();
+
+        // Ensure known enabled state regardless of persisted SesConfig on disk
+        var claudeAi      = vm.ConvSyncFeatures.First(f => f.Key == "claude_ai_sync");
+        var claudeDesktop = vm.ConvSyncFeatures.First(f => f.Key == "claude_desktop_sync");
+        var claudeCode    = vm.ConvSyncFeatures.First(f => f.Key == "claude_code_sync");
+        claudeAi.IsEnabled      = true;
+        claudeDesktop.IsEnabled = true;
+        claudeCode.IsEnabled    = true;
+
+        vm.ApplySyncStats(new SyncStats
+        {
+            ClaudeChat         = new SurfaceStats { Count = 847, LastActivity = DateTime.UtcNow.AddMinutes(-3) },
+            ClaudeCode         = new SurfaceStats { Count = 234, LastActivity = DateTime.UtcNow.AddMinutes(-1) },
+            TotalConversations = 1081,
+            TotalMessages      = 45000,
+            LocalDbSizeBytes   = 47_185_920,
+            OldestConversation = new DateTime(2023, 3, 15, 0, 0, 0, DateTimeKind.Utc),
+            NewestConversation = new DateTime(2026, 3, 6, 0, 0, 0, DateTimeKind.Utc),
+        });
+
+        // Both Claude.ai and Claude Desktop map to ClaudeChat
+        Assert.Contains("847", claudeAi.LastActivity);
+        Assert.Contains("847", claudeDesktop.LastActivity);
+        Assert.Contains("234", claudeCode.LastActivity);
+    }
+
+    [Fact]
+    public void ApplySyncStats_UpdatesTotalsProperties()
+    {
+        var vm = CreateVm();
+        var stats = new SyncStats
+        {
+            TotalConversations = 2284,
+            TotalMessages      = 156432,
+            LocalDbSizeBytes   = 47_424_512,
+            OldestConversation = new DateTime(2023, 3, 15, 0, 0, 0, DateTimeKind.Utc),
+            NewestConversation = new DateTime(2026, 3, 6, 0, 0, 0, DateTimeKind.Utc),
+        };
+
+        vm.ApplySyncStats(stats);
+
+        Assert.Contains("2,284", vm.TotalConversationsText);
+        Assert.Contains("156,432", vm.TotalMessagesText);
+        Assert.Contains("MB", vm.LocalDbSizeText);
+        Assert.NotEqual("—", vm.OldestConversationText);
+        Assert.NotEqual("—", vm.NewestConversationText);
+    }
+
+    [Fact]
+    public void ApplySyncStats_ComingSoonFeature_NotUpdated()
+    {
+        var vm = CreateVm();
+        var chatGpt = vm.ConvSyncFeatures.First(f => f.Key == "chatgpt_sync");
+        var originalActivity = chatGpt.LastActivity;
+
+        vm.ApplySyncStats(new SyncStats());
+
+        // Coming-soon features should not get stats applied
+        Assert.Equal(originalActivity, chatGpt.LastActivity);
+    }
+
+    [Fact]
+    public void ApplySyncStats_DisabledFeature_ShowsDisabled()
+    {
+        var vm = CreateVm();
+        var cowork = vm.ConvSyncFeatures.First(f => f.Key == "cowork_sync");
+        cowork.IsEnabled = false;
+
+        vm.ApplySyncStats(new SyncStats
+        {
+            Cowork = new SurfaceStats { Count = 5, LastActivity = DateTime.UtcNow }
+        });
+
+        Assert.Equal("Disabled", cowork.LastActivity);
+    }
+
+    [Fact]
+    public void ToggleFeature_PersistsToSesConfig()
+    {
+        var vm      = CreateVm();
+        var feature = vm.ConvSyncFeatures.First(f => f.Key == "claude_code_sync");
+
+        vm.ToggleFeature(feature, false);
+
+        // Reload config to verify persistence
+        var config = SesConfig.Load();
+        Assert.True(config.FeatureFlags.TryGetValue("claude_code_sync", out var val) && val == false);
+    }
 }

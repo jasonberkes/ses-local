@@ -21,6 +21,9 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
     private readonly HttpClient _longRunHttp; // separate client for long-running operations (e.g. bulk import)
     private readonly string _loginUrl;
 
+    /// <summary>Uptime string from the last successful <see cref="GetStateAsync"/> call.</summary>
+    public string LastKnownUptime { get; private set; } = string.Empty;
+
     public DaemonAuthProxy(IOptions<SesLocalOptions> options)
     {
         var sockPath = DaemonSocketPath.GetPath();
@@ -69,6 +72,7 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
             var resp = await _http.GetFromJsonAsync<DaemonStatusDto>("/api/status", ct);
             if (resp is null) return SesAuthState.Unauthenticated;
 
+            LastKnownUptime = resp.Uptime;
             return new SesAuthState
             {
                 IsAuthenticated = resp.Authenticated,
@@ -81,6 +85,7 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         catch
         {
             // Daemon not reachable (socket missing or refused)
+            LastKnownUptime = string.Empty;
             return SesAuthState.Unauthenticated;
         }
     }
@@ -200,6 +205,17 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         try { await _http.PostAsync("/api/hooks/enable", null, ct); }
         catch { /* daemon unreachable */ }
     }
+
+    /// <summary>Returns sync statistics from the daemon's /api/sync-stats endpoint, or null if daemon unreachable.</summary>
+    public async Task<SyncStats?> GetSyncStatsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<SyncStats>("/api/sync-stats", s_jsonOptions, ct);
+        }
+        catch { return null; }
+    }
+
 
     public void Dispose()
     {
