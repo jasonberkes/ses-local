@@ -1759,6 +1759,52 @@ public sealed class LocalDbService : ILocalDbService, IAsyncDisposable
         }, ct);
     }
 
+    // ── Active Sessions (TRAY-10) ─────────────────────────────────────────────
+
+    public async Task<IReadOnlyList<ActiveSession>> GetActiveClaudeCodeSessionsAsync(
+        DateTime since, CancellationToken ct = default)
+    {
+        var conn = await GetConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT title, updated_at
+            FROM conv_sessions
+            WHERE source = 'ClaudeCode'
+              AND updated_at > @since
+              AND (excluded IS NULL OR excluded = 0)
+            ORDER BY updated_at DESC
+            """;
+        cmd.Parameters.AddWithValue("@since", since.ToString("O"));
+
+        // Group by project name in C# (title format: "projectname/uuid" or "[subagent] projectname/uuid")
+        var byProject = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var title       = reader.GetString(0);
+            var updatedAt   = DateTime.Parse(reader.GetString(1), null, System.Globalization.DateTimeStyles.RoundtripKind);
+            var projectName = ExtractProjectName(title);
+            if (string.IsNullOrEmpty(projectName)) continue;
+
+            if (!byProject.TryGetValue(projectName, out var existing) || updatedAt > existing)
+                byProject[projectName] = updatedAt;
+        }
+
+        return byProject
+            .Select(kvp => new ActiveSession(kvp.Key, null, kvp.Value))
+            .OrderByDescending(s => s.LastActivity)
+            .ToList();
+    }
+
+    private static string ExtractProjectName(string title)
+    {
+        var t = title.StartsWith("[subagent] ", StringComparison.Ordinal)
+            ? title["[subagent] ".Length..]
+            : title;
+        var slash = t.IndexOf('/');
+        return slash > 0 ? t[..slash] : string.Empty;
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_connection is not null)

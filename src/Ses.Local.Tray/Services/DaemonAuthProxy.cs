@@ -246,6 +246,38 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         catch { return null; }
     }
 
+    /// <summary>Returns per-component update availability from /api/updates/check, or null if daemon unreachable.</summary>
+    public async Task<IReadOnlyList<ComponentUpdateInfo>?> CheckUpdatesAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<List<ComponentUpdateInfo>>("/api/updates/check", s_jsonOptions, ct);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Asks the daemon to apply an update for the given component. Returns a message or null on failure.</summary>
+    public async Task<string?> ApplyUpdateAsync(string component, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _longRunHttp.PostAsync($"/api/updates/apply/{component}", null, ct);
+            if (!response.IsSuccessStatusCode) return null;
+            var dto = await response.Content.ReadFromJsonAsync<ApplyUpdateResponse>(s_jsonOptions, ct);
+            return dto?.Message;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Returns recently active Claude Code sessions from /api/sessions/active, or null if daemon unreachable.</summary>
+    public async Task<IReadOnlyList<ActiveSessionInfo>?> GetActiveSessionsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<List<ActiveSessionInfo>>("/api/sessions/active", s_jsonOptions, ct);
+        }
+        catch { return null; }
+    }
 
     public void Dispose()
     {
@@ -308,3 +340,27 @@ public sealed class ImportStatusResponse
     public string? FailureMessage   { get; set; }
 }
 
+/// <summary>Per-component update info returned by /api/updates/check.</summary>
+public sealed class ComponentUpdateInfo
+{
+    public string  Name             { get; set; } = string.Empty;
+    public string? InstalledVersion { get; set; }
+    public string? LatestVersion    { get; set; }
+    public bool    UpdateAvailable  { get; set; }
+}
+
+/// <summary>Response from /api/updates/apply/{component}.</summary>
+internal sealed class ApplyUpdateResponse
+{
+    public bool    Applied    { get; set; }
+    public string? NewVersion { get; set; }
+    public string? Message    { get; set; }
+}
+
+/// <summary>Active Claude Code session returned by /api/sessions/active.</summary>
+public sealed class ActiveSessionInfo
+{
+    public string   ProjectName  { get; set; } = string.Empty;
+    public string?  FullPath     { get; set; }
+    public DateTime LastActivity { get; set; }
+}

@@ -30,6 +30,10 @@ public sealed class SesLocalOptions
     public string SesLocalManifestUrl { get; init; } =
         "https://tmprodeus2data.blob.core.windows.net/artifacts/ses-local/latest.json";
 
+    /// <summary>ses-hooks auto-update manifest URL.</summary>
+    public string SesHooksManifestUrl { get; init; } =
+        "https://tmprodeus2data.blob.core.windows.net/artifacts/ses-hooks/latest.json";
+
     /// <summary>Documentation site base URL.</summary>
     public string DocsBaseUrl { get; init; } = "https://docs.supereasysoftware.com";
 

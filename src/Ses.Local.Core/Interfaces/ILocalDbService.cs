@@ -222,4 +222,14 @@ public interface ILocalDbService
     /// ~/.claude/projects/ JSONL files for their cwd fields.
     /// </summary>
     Task<IReadOnlyList<string>> GetKnownProjectsAsync(CancellationToken ct = default);
+
+    // ── Active Sessions (TRAY-10) ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns recent Claude Code sessions updated since <paramref name="since"/>,
+    /// grouped by project name (extracted from the session title), ordered by most recent first.
+    /// FullPath is always null — callers enrich it using the filesystem.
+    /// </summary>
+    Task<IReadOnlyList<ActiveSession>> GetActiveClaudeCodeSessionsAsync(
+        DateTime since, CancellationToken ct = default);
 }

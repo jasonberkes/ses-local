@@ -274,6 +274,43 @@ internal static class Program
             return Results.Ok(paths);
         });
 
+        // ── Updates & active sessions (TRAY-10) ───────────────────────────────
+
+        app.MapGet("/api/updates/check", async (ComponentUpdateChecker checker, HttpContext ctx) =>
+        {
+            var updates = await checker.CheckAsync(ctx.RequestAborted);
+            return Results.Ok(updates.Select(u => new
+            {
+                name             = u.Name,
+                installedVersion = u.InstalledVersion,
+                latestVersion    = u.LatestVersion,
+                updateAvailable  = u.UpdateAvailable,
+            }));
+        });
+
+        app.MapPost("/api/updates/apply/{component}", async (string component, SesLocalUpdater sesLocalUpdater, SesMcpUpdater sesMcpUpdater, HttpContext ctx) =>
+        {
+            UpdateResult result = component switch
+            {
+                "ses-local-daemon" => await sesLocalUpdater.CheckAndApplyAsync(ctx.RequestAborted),
+                "ses-mcp"          => await sesMcpUpdater.CheckAndApplyAsync(ctx.RequestAborted),
+                _                  => new UpdateResult(false, null, $"Unknown component: {component}"),
+            };
+            return Results.Ok(new { applied = result.UpdateApplied, newVersion = result.NewVersion, message = result.Message });
+        });
+
+        app.MapGet("/api/sessions/active", async (ILocalDbService db, HttpContext ctx) =>
+        {
+            var since    = DateTime.UtcNow.AddHours(-24);
+            var sessions = await db.GetActiveClaudeCodeSessionsAsync(since, ctx.RequestAborted);
+            return Results.Ok(sessions.Select(s => new
+            {
+                projectName  = s.ProjectName,
+                fullPath     = ProjectPathHelper.TryGetProjectFullPath(s.ProjectName),
+                lastActivity = s.LastActivity.ToString("O"),
+            }));
+        });
+
         var logger = app.Services.GetRequiredService<ILoggerFactory>()
             .CreateLogger("Ses.Local.Daemon.Program");
 
@@ -449,5 +486,68 @@ internal sealed class ImportProgressTracker : IDisposable
     public void Dispose()
     {
         lock (_lock) { _cts.Dispose(); }
+    }
+}
+
+/// <summary>
+/// Resolves a Claude Code project name to its full filesystem path by scanning
+/// ~/.claude/projects/ and decoding the encoded directory names.
+/// </summary>
+internal static class ProjectPathHelper
+{
+    private static readonly string ProjectsRoot =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "projects");
+
+    public static string? TryGetProjectFullPath(string projectName)
+    {
+        if (!Directory.Exists(ProjectsRoot)) return null;
+
+        // Encoded dir names replace '/' and '.' with '-'. Suffix matches: "-projectName"
+        var suffix = "-" + projectName;
+        foreach (var dir in Directory.EnumerateDirectories(ProjectsRoot))
+        {
+            var name = Path.GetFileName(dir);
+            if (!name.EndsWith(suffix, StringComparison.Ordinal)) continue;
+
+            var decoded = DecodeProjectPath(name);
+            if (decoded is not null && Directory.Exists(decoded))
+                return decoded;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Greedily reconstructs the original filesystem path from an encoded directory name.
+    /// Encoding: each path separator '/' and '.' becomes '-'.
+    /// Strategy: split on '-', then try combining adjacent segments from longest to shortest
+    /// to match real directories, favouring paths that actually exist on disk.
+    /// </summary>
+    private static string? DecodeProjectPath(string encodedName)
+    {
+        // Encoded name starts with '-' (representing the leading '/')
+        if (!encodedName.StartsWith('-')) return null;
+
+        var parts = encodedName[1..].Split('-');
+        return TryBuildPath("/", parts, 0);
+    }
+
+    private static string? TryBuildPath(string current, string[] parts, int idx)
+    {
+        if (idx == parts.Length) return current;
+
+        // Try combining segments from longest to shortest to handle directory names with dashes
+        for (var len = parts.Length - idx; len >= 1; len--)
+        {
+            var segment = string.Join("-", parts[idx..(idx + len)]);
+            var candidate = Path.Combine(current, segment);
+            if (Directory.Exists(candidate))
+            {
+                var result = TryBuildPath(candidate, parts, idx + len);
+                if (result is not null) return result;
+            }
+        }
+
+        return null;
     }
 }

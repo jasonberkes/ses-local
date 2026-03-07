@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -30,6 +31,7 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     private readonly ClaudeDesktopConfigService _desktopSettings;
     private readonly bool _ownsCcSettings;
     private readonly EventHandler _onSettingsChanged;
+    private readonly NotifyCollectionChangedEventHandler _onActiveSessionsChanged;
     private readonly NotificationService? _notifService;
     private readonly EventHandler _onNotificationsChanged;
 
@@ -114,6 +116,25 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     private string _addValidationError = "";
     private string _restartStatus = "";
     private bool _isRestarting;
+
+    // ── Updates & active sessions (TRAY-10) ───────────────────────────────────
+    private DateTime? _updateCheckLastChecked;
+    private bool _isCheckingUpdates;
+
+    public ObservableCollection<ComponentUpdateViewModel> UpdateItems    { get; } = [];
+    public ObservableCollection<ActiveSessionViewModel>  ActiveSessions { get; } = [];
+
+    public bool HasActiveSessions => ActiveSessions.Count > 0;
+
+    public string UpdateCheckLastChecked => _updateCheckLastChecked is null
+        ? "Not checked yet"
+        : "Last checked: " + FormatAge(_updateCheckLastChecked.Value.ToLocalTime());
+
+    public bool IsCheckingUpdates
+    {
+        get => _isCheckingUpdates;
+        set { _isCheckingUpdates = value; OnPropertyChanged(); }
+    }
 
     // ── Hooks state (TRAY-3) ───────────────────────────────────────────────────
     private StatusDot _hooksStatusDot = StatusDot.Grey;
@@ -354,8 +375,10 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         _ownsCcSettings      = ccSettings is null;
         _ccSettings          = ccSettings ?? new ClaudeCodeSettingsService();
         _desktopSettings     = desktopSettings ?? new ClaudeDesktopConfigService();
-        _onSettingsChanged   = (_, _) => RefreshCcConfig();
+        _onSettingsChanged           = (_, _) => RefreshCcConfig();
+        _onActiveSessionsChanged     = (_, _) => OnPropertyChanged(nameof(HasActiveSessions));
         _ccSettings.SettingsChanged += _onSettingsChanged;
+        ActiveSessions.CollectionChanged += _onActiveSessionsChanged;
         ImportWizard             = importWizard;
         _notifService            = notifications;
         _onNotificationsChanged  = (_, _) => RefreshNotifications();
@@ -626,6 +649,11 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
         else if (tab == PanelTab.Import)
         {
             _ = RefreshImportHistoryAsync();
+        }
+        else if (tab == PanelTab.Settings)
+        {
+            _ = CheckUpdatesAsync();
+            _ = RefreshActiveSessionsAsync();
         }
     }
 
@@ -1001,6 +1029,55 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
                                         dt.Value.ToString("yyyy-MM-dd");
     }
 
+    // ── Updates & active sessions (TRAY-10) ───────────────────────────────────
+
+    public async Task CheckUpdatesAsync(bool force = false, CancellationToken ct = default)
+    {
+        if (_isCheckingUpdates) return;
+        if (!force && _updateCheckLastChecked.HasValue && UpdateItems.Count > 0
+            && (DateTime.Now - _updateCheckLastChecked.Value).TotalMinutes < 5) return;
+        IsCheckingUpdates = true;
+        try
+        {
+            var updates = await _daemonProxy.CheckUpdatesAsync(ct);
+            if (updates is null) return;
+
+            UpdateItems.Clear();
+            foreach (var u in updates)
+                UpdateItems.Add(new ComponentUpdateViewModel(u));
+
+            _updateCheckLastChecked = DateTime.Now;
+            OnPropertyChanged(nameof(UpdateCheckLastChecked));
+        }
+        finally
+        {
+            IsCheckingUpdates = false;
+        }
+    }
+
+    public async Task ApplyUpdateAsync(ComponentUpdateViewModel item, CancellationToken ct = default)
+    {
+        item.IsUpdating = true;
+        try
+        {
+            var message = await _daemonProxy.ApplyUpdateAsync(item.Name, ct);
+            item.UpdateMessage = message ?? "Update failed";
+        }
+        finally
+        {
+            item.IsUpdating = false;
+        }
+    }
+
+    public async Task RefreshActiveSessionsAsync(CancellationToken ct = default)
+    {
+        var sessions = await _daemonProxy.GetActiveSessionsAsync(ct);
+        ActiveSessions.Clear();
+        if (sessions is null) return;
+        foreach (var s in sessions)
+            ActiveSessions.Add(new ActiveSessionViewModel(s));
+    }
+
     public void OpenTroubleshoot() => OpenUrl(_troubleshootUrl);
 
     private static void OpenUrl(string url)
@@ -1024,6 +1101,7 @@ public sealed class DropdownPanelViewModel : INotifyPropertyChanged, IDisposable
     public void Dispose()
     {
         _ccSettings.SettingsChanged -= _onSettingsChanged;
+        ActiveSessions.CollectionChanged -= _onActiveSessionsChanged;
         if (_notifService is not null)
             _notifService.NotificationsChanged -= _onNotificationsChanged;
         if (_ownsCcSettings)
