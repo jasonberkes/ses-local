@@ -129,10 +129,7 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
 
     public Task TriggerReauthAsync(CancellationToken ct = default)
     {
-        if (OperatingSystem.IsMacOS())
-            System.Diagnostics.Process.Start("open", _loginUrl);
-        else if (OperatingSystem.IsWindows())
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(_loginUrl) { UseShellExecute = true });
+        OsOpen.Launch(_loginUrl);
         return Task.CompletedTask;
     }
 
