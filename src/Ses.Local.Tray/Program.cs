@@ -57,6 +57,9 @@ internal static class Program
 
                 // DaemonSupervisor manages daemon lifecycle with crash recovery
                 services.AddSingleton<DaemonSupervisor>();
+
+                // DiagnosticBundleService (OBS-3)
+                services.AddSingleton<DiagnosticBundleService>();
             })
             .Build();
 

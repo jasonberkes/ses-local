@@ -3,6 +3,9 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>ses-local-daemon</AssemblyName>
     <IsTrimmableExe>true</IsTrimmableExe>
+    <!-- Bundle native libraries (e.g. e_sqlite3.dylib) inside the single-file executable
+         so SQLite works when published with PublishSingleFile=true. -->
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Ses.Local.Core\Ses.Local.Core.csproj" />

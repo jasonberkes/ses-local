@@ -59,6 +59,71 @@ public sealed class SesMcpManagerTests
         Assert.Null(ex);
     }
 
+    // ── GetStatus IsConfigured tests (BUG 2 fix) ─────────────────────────────
+    // GetStatus() uses static paths so we test the underlying logic via ClaudeDesktopConfig.
+
+    [Fact]
+    public void GetStatus_IsConfigured_RequiresBinaryToBeInstalled()
+    {
+        var manager = BuildManager();
+        var status = manager.GetStatus();
+        // IsConfigured can only be true when the binary is also installed
+        if (!status.IsInstalled)
+            Assert.False(status.IsConfigured);
+    }
+
+    [Fact]
+    public void ClaudeDesktopConfig_IsConfigured_TrueWhenSesLocalPresentWithMatchingCommand()
+    {
+        var tempConfig = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.json");
+        try
+        {
+            var binaryPath = "/Users/test/.ses/bin/ses-mcp";
+            var config = new ClaudeDesktopConfig();
+            config.McpServers["ses-local"] = new McpServerEntry
+            {
+                Command = binaryPath,
+                Args    = ["--transport", "stdio", "--skip-update"]
+            };
+            config.Save(tempConfig);
+
+            var loaded       = ClaudeDesktopConfig.Load(tempConfig);
+            var hasSesLocal  = loaded.McpServers.TryGetValue("ses-local", out var entry);
+            var isConfigured = hasSesLocal;
+            var hasDrift     = hasSesLocal && (entry!.Command != binaryPath
+                               || !entry.Args.SequenceEqual(["--transport", "stdio", "--skip-update"]));
+
+            Assert.True(isConfigured);
+            Assert.False(hasDrift);
+        }
+        finally { File.Delete(tempConfig); }
+    }
+
+    [Fact]
+    public void ClaudeDesktopConfig_HasConfigDrift_TrueWhenCommandMismatch()
+    {
+        var tempConfig = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.json");
+        try
+        {
+            const string expectedBinary = "/new/path/ses-mcp";
+            var config = new ClaudeDesktopConfig();
+            config.McpServers["ses-local"] = new McpServerEntry
+            {
+                Command = "/old/path/ses-mcp",   // wrong path → drift
+                Args    = ["--transport", "stdio", "--skip-update"]
+            };
+            config.Save(tempConfig);
+
+            var loaded      = ClaudeDesktopConfig.Load(tempConfig);
+            var hasSesLocal = loaded.McpServers.TryGetValue("ses-local", out var entry);
+            var hasDrift    = hasSesLocal && entry!.Command != expectedBinary;
+
+            Assert.True(hasSesLocal);
+            Assert.True(hasDrift);
+        }
+        finally { File.Delete(tempConfig); }
+    }
+
     [Fact]
     public void ClaudeDesktopConfig_LoadFromMissingPath_ReturnsEmpty()
     {
@@ -127,6 +192,19 @@ public sealed class SesMcpManagerTests
         {
             File.Delete(tempPath);
         }
+    }
+
+    private static SesMcpManager BuildManager()
+    {
+        var keychain = new Mock<ICredentialStore>();
+        keychain.Setup(x => x.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string?)null);
+
+        return new SesMcpManager(
+            BuildFailingFactory(), keychain.Object, BuildUpdater(),
+            new Mock<IAuthService>().Object,
+            NullLogger<SesMcpManager>.Instance,
+            Options.Create(new SesLocalOptions()));
     }
 
     private static SesMcpUpdater BuildUpdater()

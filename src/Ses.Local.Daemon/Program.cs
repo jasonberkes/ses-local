@@ -351,6 +351,58 @@ internal static class Program
         app.MapGet("/api/health", (HealthMonitorWorker health) =>
             Results.Ok(health.LatestReport));
 
+        // OBS-6: Comprehensive one-shot repair — runs all component checks and returns a step-by-step report.
+        app.MapPost("/api/repair", async (SesMcpManager mcpManager, IAuthService auth, ILocalDbService db, HttpContext ctx) =>
+        {
+            var steps = new List<string>();
+
+            // Step 1: Socket — we're running so it's OK
+            steps.Add("Socket: OK (daemon running)");
+
+            // Step 2: Auth check/refresh
+            try
+            {
+                var authState = await auth.GetStateAsync(ctx.RequestAborted);
+                if (!authState.IsAuthenticated && authState.NeedsReauth)
+                {
+                    await auth.TriggerReauthAsync(ctx.RequestAborted);
+                    steps.Add("Auth: Reauth triggered");
+                }
+                else
+                {
+                    steps.Add(authState.IsAuthenticated ? "Auth: OK" : "Auth: Not authenticated");
+                }
+            }
+            catch (Exception ex) { steps.Add($"Auth: Error — {ex.GetType().Name}"); }
+
+            // Step 3: Repair MCP config + ses-mcp binary
+            try
+            {
+                var mcpResult = await mcpManager.CheckAndRepairAsync(ctx.RequestAborted);
+                steps.Add($"ses-mcp: {(mcpResult.IsInstalled ? "Installed" : "Install attempted")}");
+                steps.Add($"ClaudeDesktop: {(mcpResult.IsConfigured ? "Configured" : "Repair attempted")}");
+            }
+            catch (Exception ex) { steps.Add($"ses-mcp/ClaudeDesktop: Error — {ex.GetType().Name}"); }
+
+            // Step 4: Re-register Claude Code hooks
+            try
+            {
+                await mcpManager.CheckAndRepairClaudeCodeHooksAsync(ctx.RequestAborted);
+                steps.Add("CCHooks: Re-registered");
+            }
+            catch (Exception ex) { steps.Add($"CCHooks: Error — {ex.GetType().Name}"); }
+
+            // Step 5: SQLite integrity check
+            try
+            {
+                await db.GetSyncStatsAsync(ctx.RequestAborted);
+                steps.Add("SQLite: OK");
+            }
+            catch (Exception ex) { steps.Add($"SQLite: Error — {ex.GetType().Name}"); }
+
+            return Results.Ok(new { steps });
+        });
+
         app.MapGet("/api/sessions/active", async (ILocalDbService db, HttpContext ctx) =>
         {
             var since    = DateTime.UtcNow.AddHours(-24);
