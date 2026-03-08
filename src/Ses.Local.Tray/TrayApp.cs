@@ -51,6 +51,18 @@ public partial class TrayApp : Application
     private NativeMenuItem _sesMcpComponentItem  = null!;
     private NativeMenuItem _sesHooksComponentItem = null!;
 
+    // Health submenu items (OBS-5)
+    private NativeMenuItem _healthIssueItem       = null!;
+    private NativeMenuItem _healthAuthItem        = null!;
+    private NativeMenuItem _healthSesMcpItem      = null!;
+    private NativeMenuItem _healthClaudeDesktop   = null!;
+    private NativeMenuItem _healthCcHooksItem     = null!;
+    private NativeMenuItem _healthSocketItem      = null!;
+    private NativeMenuItem _healthSqliteItem      = null!;
+
+    // Fix Issues menu item (OBS-6)
+    private NativeMenuItem _fixIssuesItem         = null!;
+
     public override void Initialize() => AvaloniaXamlLoader.Load(this);
 
     public override void OnFrameworkInitializationCompleted()
@@ -154,10 +166,24 @@ public partial class TrayApp : Application
         menu.Items.Add(BuildComponentsMenu());
         menu.Items.Add(new NativeMenuItemSeparator());
 
+        // Health submenu (OBS-5)
+        menu.Items.Add(BuildHealthMenu());
+        menu.Items.Add(new NativeMenuItemSeparator());
+
         // Actions
         _signInItem = new NativeMenuItem("Sign In...");
         _signInItem.Click += (_, _) => _ = OnSignInOrOutClickedAsync();
         menu.Items.Add(_signInItem);
+
+        // Fix Issues (OBS-6)
+        _fixIssuesItem = new NativeMenuItem("Fix Issues...");
+        _fixIssuesItem.Click += (_, _) => _ = OnFixIssuesClickedAsync();
+        menu.Items.Add(_fixIssuesItem);
+
+        // Share Diagnostics (OBS-3)
+        var diagnosticsItem = new NativeMenuItem("Share Diagnostics...");
+        diagnosticsItem.Click += (_, _) => _ = OnShareDiagnosticsClickedAsync();
+        menu.Items.Add(diagnosticsItem);
 
         var stopItem = new NativeMenuItem("Stop Daemon");
         stopItem.Click += (_, _) => _ = OnStopDaemonClicked();
@@ -228,6 +254,29 @@ public partial class TrayApp : Application
         compMenu.Items.Add(checkUpdatesItem);
 
         return new NativeMenuItem("Components") { Menu = compMenu };
+    }
+
+    private NativeMenuItem BuildHealthMenu()
+    {
+        var healthMenu = new NativeMenu();
+
+        _healthIssueItem     = new NativeMenuItem("") { IsEnabled = false };
+        _healthAuthItem      = new NativeMenuItem("⚪ Auth") { IsEnabled = false };
+        _healthSesMcpItem    = new NativeMenuItem("⚪ ses-mcp") { IsEnabled = false };
+        _healthClaudeDesktop = new NativeMenuItem("⚪ ClaudeDesktop") { IsEnabled = false };
+        _healthCcHooksItem   = new NativeMenuItem("⚪ CCHooks") { IsEnabled = false };
+        _healthSocketItem    = new NativeMenuItem("⚪ Socket") { IsEnabled = false };
+        _healthSqliteItem    = new NativeMenuItem("⚪ SQLite") { IsEnabled = false };
+
+        healthMenu.Items.Add(_healthIssueItem);
+        healthMenu.Items.Add(_healthAuthItem);
+        healthMenu.Items.Add(_healthSesMcpItem);
+        healthMenu.Items.Add(_healthClaudeDesktop);
+        healthMenu.Items.Add(_healthCcHooksItem);
+        healthMenu.Items.Add(_healthSocketItem);
+        healthMenu.Items.Add(_healthSqliteItem);
+
+        return new NativeMenuItem("Health") { Menu = healthMenu };
     }
 
     // ── status update ─────────────────────────────────────────────────────────
@@ -318,8 +367,9 @@ public partial class TrayApp : Application
         var syncStatsTask     = proxy.GetSyncStatsAsync(ct);
         var componentsTask    = proxy.GetComponentsAsync(ct);
         var importHistoryTask = proxy.GetImportHistoryAsync(ct);
+        var healthTask        = proxy.GetHealthAsync(ct);
 
-        try { await Task.WhenAll(syncStatsTask, componentsTask, importHistoryTask); }
+        try { await Task.WhenAll(syncStatsTask, componentsTask, importHistoryTask, healthTask); }
         catch { /* check IsCompletedSuccessfully below */ }
 
         // Sync stats
@@ -358,6 +408,62 @@ public partial class TrayApp : Application
         var history = importHistoryTask.IsCompletedSuccessfully ? importHistoryTask.Result : null;
         if (history?.Count > 0)
             _lastImportItem.Header = $"Last import: {FormatAge(history[0].ImportedAt)}";
+
+        // Health (OBS-5)
+        var health = healthTask.IsCompletedSuccessfully ? healthTask.Result : null;
+        UpdateHealthMenuItems(health, authState);
+    }
+
+    private void UpdateHealthMenuItems(Ses.Local.Core.Models.HealthReport? health, SesAuthState? authState)
+    {
+        if (health is null)
+        {
+            _healthIssueItem.Header = "";
+            return;
+        }
+
+        static string CheckIcon(Ses.Local.Core.Models.ComponentHealth status) => status switch
+        {
+            Ses.Local.Core.Models.ComponentHealth.Healthy   => "🟢",
+            Ses.Local.Core.Models.ComponentHealth.Degraded  => "🟡",
+            Ses.Local.Core.Models.ComponentHealth.Unhealthy => "🔴",
+            _                                               => "⚪",
+        };
+
+        string Fmt(string name, string label)
+        {
+            var check = health.Checks.FirstOrDefault(c => c.Name == name);
+            var msg   = check?.Message is { Length: > 0 } m ? $"  {m}" : "";
+            return $"{CheckIcon(check?.Status ?? Ses.Local.Core.Models.ComponentHealth.Healthy)} {label}{msg}";
+        }
+
+        _healthAuthItem.Header      = Fmt("Auth", "Auth");
+        _healthSesMcpItem.Header    = Fmt("ses-mcp", "ses-mcp");
+        _healthClaudeDesktop.Header = Fmt("ClaudeDesktop", "ClaudeDesktop");
+        _healthCcHooksItem.Header   = Fmt("CCHooks", "CCHooks");
+        _healthSocketItem.Header    = Fmt("Socket", "Socket");
+        _healthSqliteItem.Header    = Fmt("SQLite", "SQLite");
+
+        var degraded  = health.Checks.Count(c => c.Status == Ses.Local.Core.Models.ComponentHealth.Degraded);
+        var unhealthy = health.Checks.Count(c => c.Status == Ses.Local.Core.Models.ComponentHealth.Unhealthy);
+        var issues    = degraded + unhealthy;
+
+        if (issues == 0)
+        {
+            _healthIssueItem.Header = "";
+        }
+        else if (degraded > 0 && unhealthy == 0)
+        {
+            _healthIssueItem.Header = $"⚠️ {issues} issue{(issues == 1 ? "" : "s")} auto-repairing";
+            if (authState?.IsAuthenticated == true)
+                _statusItem.Header = $"🟡 Connected ({issues} auto-repairing)";
+        }
+        else
+        {
+            _healthIssueItem.Header = $"⚠️ {issues} issue{(issues == 1 ? "" : "s")}";
+            if (authState?.IsAuthenticated == true)
+                _statusItem.Header = $"🟡 Connected ({issues} issue{(issues == 1 ? "" : "s")})";
+        }
     }
 
     private void UpdateTrayBadge()
@@ -406,6 +512,45 @@ public partial class TrayApp : Application
         {
             await auth.TriggerReauthAsync();
         }
+    }
+
+    private async Task OnFixIssuesClickedAsync()
+    {
+        if (_services is null) return;
+        var proxy = _services.GetRequiredService<DaemonAuthProxy>();
+        _fixIssuesItem.Header = "Fixing...";
+        try
+        {
+            var result = await proxy.RepairAsync();
+            var fixed_ = result?.Steps?.Count(s =>
+                !s.Contains("OK", StringComparison.OrdinalIgnoreCase) &&
+                !s.Contains("Error", StringComparison.OrdinalIgnoreCase)) ?? 0;
+            _fixIssuesItem.Header = fixed_ > 0
+                ? $"✓ Fixed {fixed_} issue{(fixed_ == 1 ? "" : "s")}"
+                : "✓ All clear";
+        }
+        catch
+        {
+            _fixIssuesItem.Header = "Fix Issues...";
+            return;
+        }
+
+        // Reset label after 5 seconds
+        _ = Task.Delay(TimeSpan.FromSeconds(5))
+            .ContinueWith(_ => Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(
+                () => _fixIssuesItem.Header = "Fix Issues..."));
+    }
+
+    private async Task OnShareDiagnosticsClickedAsync()
+    {
+        if (_services is null) return;
+        try
+        {
+            var svc = _services.GetRequiredService<DiagnosticBundleService>();
+            var zipPath = await svc.CreateBundleAsync();
+            OsOpen.Launch(Path.GetDirectoryName(zipPath)!);
+        }
+        catch { /* non-fatal */ }
     }
 
     private async Task OnStopDaemonClicked()

@@ -279,6 +279,18 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         catch { return null; }
     }
 
+    /// <summary>Runs comprehensive one-shot repair via POST /api/repair, or null if daemon unreachable.</summary>
+    public async Task<RepairResponse?> RepairAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _http.PostAsync("/api/repair", null, ct);
+            if (!response.IsSuccessStatusCode) return null;
+            return await response.Content.ReadFromJsonAsync<RepairResponse>(s_jsonOptions, ct);
+        }
+        catch { return null; }
+    }
+
     /// <summary>Returns recently active Claude Code sessions from /api/sessions/active, or null if daemon unreachable.</summary>
     public async Task<IReadOnlyList<ActiveSessionInfo>?> GetActiveSessionsAsync(CancellationToken ct = default)
     {
@@ -393,4 +405,10 @@ public sealed class LogEntriesResponse
 {
     public string?   File    { get; set; }
     public string[]  Entries { get; set; } = [];
+}
+
+/// <summary>Response from POST /api/repair.</summary>
+public sealed class RepairResponse
+{
+    public List<string> Steps { get; set; } = [];
 }

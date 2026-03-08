@@ -97,11 +97,35 @@ public sealed class SesMcpManager
     /// </summary>
     public SesMcpHealthStatus GetStatus()
     {
-        var binaryPath = SesMcpUpdater.GetSesMcpBinaryPath();
+        var binaryPath  = SesMcpUpdater.GetSesMcpBinaryPath();
+        var configPath  = GetClaudeDesktopConfigPath();
+        var isInstalled = File.Exists(binaryPath);
+
+        bool isConfigured   = false;
+        bool hasConfigDrift = false;
+
+        if (isInstalled && File.Exists(configPath))
+        {
+            try
+            {
+                var config = ClaudeDesktopConfig.Load(configPath);
+                if (config.McpServers.TryGetValue(SesLocalMcpKey, out var entry))
+                {
+                    isConfigured = true;
+                    // Drift: command points to wrong binary or args changed
+                    hasConfigDrift = entry.Command != binaryPath
+                                  || !entry.Args.SequenceEqual(SesLocalArgs);
+                }
+            }
+            catch { /* treat as not configured — non-fatal */ }
+        }
+
         return new SesMcpHealthStatus
         {
-            IsInstalled      = File.Exists(binaryPath),
-            ConfigPath       = GetClaudeDesktopConfigPath(),
+            IsInstalled       = isInstalled,
+            IsConfigured      = isConfigured,
+            HasConfigDrift    = hasConfigDrift,
+            ConfigPath        = configPath,
             SesHooksInstalled = File.Exists(GetSesHooksBinaryPath()),
         };
     }
