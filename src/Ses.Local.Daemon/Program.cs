@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
+using Serilog;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Models;
 using Ses.Local.Core.Options;
@@ -31,10 +32,29 @@ internal static class Program
             return;
         }
 
+        var logDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".ses", "logs");
+        Directory.CreateDirectory(logDir);
+
+        var logPath = Path.Combine(logDir, "daemon-.log");
+
         var socketPath = DaemonSocketPath.GetPath();
         DaemonSocketPath.CleanupStaleSocket();
 
         var builder = WebApplication.CreateBuilder(args);
+
+        builder.Host.UseSerilog((ctx, config) => config
+            .ReadFrom.Configuration(ctx.Configuration)
+            .WriteTo.Console()
+            .WriteTo.File(logPath,
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 7,
+                outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
+                shared: true,
+                flushToDiskInterval: TimeSpan.FromSeconds(5))
+            .Enrich.FromLogContext()
+            .Enrich.WithProperty("App", "ses-local-daemon"));
 
         // Kestrel listens ONLY on Unix domain socket (or named pipe on Windows) — no TCP
         builder.WebHost.ConfigureKestrel(options =>
@@ -230,6 +250,30 @@ internal static class Program
         {
             var stats = await db.GetSyncStatsAsync(ctx.RequestAborted);
             return Results.Ok(stats);
+        });
+
+        app.MapGet("/api/logs", async (int? lines, string? level, CancellationToken ct) =>
+        {
+            string? latestLog = null;
+            try
+            {
+                latestLog = Directory.GetFiles(logDir, "daemon-*.log")
+                    .OrderByDescending(f => f)
+                    .FirstOrDefault();
+            }
+            catch (DirectoryNotFoundException) { }
+
+            if (latestLog is null)
+                return Results.Ok(new { entries = Array.Empty<string>() });
+
+            var tag = level is not null ? $"[{level.ToUpperInvariant()}]" : null;
+            var allLines = File.ReadLines(latestLog);
+            var filtered = tag is not null
+                ? allLines.Where(l => l.Contains(tag, StringComparison.OrdinalIgnoreCase))
+                : allLines;
+
+            var result = filtered.TakeLast(lines ?? 50).ToArray();
+            return Results.Ok(new { file = Path.GetFileName(latestLog), entries = result });
         });
 
         app.MapPost("/api/shutdown", (IHostApplicationLifetime lifetime) =>

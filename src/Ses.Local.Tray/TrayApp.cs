@@ -137,6 +137,19 @@ public partial class TrayApp : Application
         menu.Items.Add(_lastImportItem);
         menu.Items.Add(new NativeMenuItemSeparator());
 
+        // View Logs
+        var viewLogsItem = new NativeMenuItem("View Logs...");
+        viewLogsItem.Click += (_, _) =>
+        {
+            var logsDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".ses", "logs");
+            if (Directory.Exists(logsDir))
+                OsOpen.Launch(logsDir);
+        };
+        menu.Items.Add(viewLogsItem);
+        menu.Items.Add(new NativeMenuItemSeparator());
+
         // Components submenu
         menu.Items.Add(BuildComponentsMenu());
         menu.Items.Add(new NativeMenuItemSeparator());

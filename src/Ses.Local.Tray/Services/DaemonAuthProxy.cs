@@ -289,6 +289,19 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         catch { return null; }
     }
 
+    /// <summary>Returns daemon log entries from /api/logs, or null if daemon unreachable.</summary>
+    public async Task<LogEntriesResponse?> GetLogsAsync(int lines = 50, string? level = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var url = level is not null
+                ? $"/api/logs?lines={lines}&level={Uri.EscapeDataString(level)}"
+                : $"/api/logs?lines={lines}";
+            return await _http.GetFromJsonAsync<LogEntriesResponse>(url, s_jsonOptions, ct);
+        }
+        catch { return null; }
+    }
+
     public void Dispose()
     {
         _http.Dispose();
@@ -373,4 +386,11 @@ public sealed class ActiveSessionInfo
     public string   ProjectName  { get; set; } = string.Empty;
     public string?  FullPath     { get; set; }
     public DateTime LastActivity { get; set; }
+}
+
+/// <summary>Log entries returned by the daemon's /api/logs endpoint.</summary>
+public sealed class LogEntriesResponse
+{
+    public string?   File    { get; set; }
+    public string[]  Entries { get; set; } = [];
 }
