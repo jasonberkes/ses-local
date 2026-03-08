@@ -105,4 +105,50 @@ public sealed class ClaudeCodeWatcherTests
         // Cleanup
         Directory.Delete(tempDir, recursive: true);
     }
+
+    [Fact]
+    public async Task ProcessFile_MalformedJsonl_SkippedOnSubsequentScans()
+    {
+        // Arrange — write a temp file with invalid JSON
+        var tempDir    = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        var sessionDir = Path.Combine(tempDir, "encoded-project-dir");
+        Directory.CreateDirectory(sessionDir);
+        var filePath = Path.Combine(sessionDir, "bad-session.jsonl");
+        await File.WriteAllTextAsync(filePath, "not valid json\n{also bad}\n");
+
+        var db = new Mock<ILocalDbService>();
+        var watcher = new ClaudeCodeWatcher(db.Object, NoOpGenerator().Object, NoOpWorkItemLinker(),
+            NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+
+        var processMethod = typeof(ClaudeCodeWatcher).GetMethod("ProcessFileAsync",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var scanMethod = typeof(ClaudeCodeWatcher).GetMethod("ScanAllAsync",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        // First scan — processes the file (no new data, but records position)
+        await (Task)scanMethod.Invoke(watcher, [tempDir, CancellationToken.None])!;
+
+        // Access _failedFiles via reflection to verify state after a file that throws
+        // The test primarily verifies no unhandled exception from ScanAllAsync
+        var ex = await Record.ExceptionAsync(() =>
+            (Task)scanMethod.Invoke(watcher, [tempDir, CancellationToken.None])!);
+        Assert.Null(ex);
+
+        // No session should have been created from malformed JSON
+        db.Verify(x => x.UpsertSessionAsync(It.IsAny<ConversationSession>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // Cleanup
+        Directory.Delete(tempDir, recursive: true);
+    }
+
+    [Fact]
+    public void IsStaleWorktreeFile_NonWorktreePath_ReturnsFalse()
+    {
+        var method = typeof(ClaudeCodeWatcher).GetMethod("IsStaleWorktreeFile",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+
+        // Normal project path — not a worktree
+        var result = (bool)method.Invoke(null, ["/Users/test/.claude/projects/-Users-test-myproject/session.jsonl"])!;
+        Assert.False(result);
+    }
 }

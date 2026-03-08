@@ -22,6 +22,20 @@ public sealed class ClaudeAiSyncService
     private readonly ILogger<ClaudeAiSyncService> _logger;
     private bool _initialSyncDone;
 
+    // Backoff state for repeated failures
+    private int _consecutiveFailures;
+    private DateTime _backoffUntil = DateTime.MinValue;
+    private bool _noCookieWarningLogged;
+
+    // Backoff schedule: 30s → 1min → 5min → 15min max
+    private static readonly TimeSpan[] BackoffIntervals =
+    [
+        TimeSpan.FromSeconds(30),
+        TimeSpan.FromMinutes(1),
+        TimeSpan.FromMinutes(5),
+        TimeSpan.FromMinutes(15)
+    ];
+
     public ClaudeAiSyncService(
         IHttpClientFactory httpClientFactory,
         ClaudeSessionCookieExtractor cookieExtractor,
@@ -41,12 +55,26 @@ public sealed class ClaudeAiSyncService
     /// </summary>
     public async Task SyncAsync(IReadOnlyList<string>? targetUuids = null, CancellationToken ct = default)
     {
+        // Check backoff — skip if we're in a backoff period from previous failures
+        if (DateTime.UtcNow < _backoffUntil)
+        {
+            _logger.LogDebug("ClaudeAi sync skipped — backing off until {BackoffUntil}", _backoffUntil);
+            return;
+        }
+
         var cookie = _cookieExtractor.Extract();
         if (string.IsNullOrEmpty(cookie))
         {
-            _logger.LogDebug("No Claude Desktop session cookie — skipping sync (browser extension will supplement)");
+            if (!_noCookieWarningLogged)
+            {
+                _logger.LogWarning("ClaudeAi sync skipped — no session cookies available");
+                _noCookieWarningLogged = true;
+            }
             return;
         }
+
+        // Cookie found — reset the no-cookie warning so it fires again if cookies disappear later
+        _noCookieWarningLogged = false;
 
         var http = _httpClientFactory.CreateClient(ClaudeAiClient.HttpClientName);
         using var client = new ClaudeAiClient(http, cookie,
@@ -58,10 +86,8 @@ public sealed class ClaudeAiSyncService
             {
                 await BulkSyncAsync(client, ct);
                 _initialSyncDone = true;
-                return;
             }
-
-            if (targetUuids is { Count: > 0 })
+            else if (targetUuids is { Count: > 0 })
             {
                 await TargetedSyncAsync(client, targetUuids, ct);
             }
@@ -69,9 +95,21 @@ public sealed class ClaudeAiSyncService
             {
                 await IncrementalSyncAsync(client, ct);
             }
+
+            // Success — reset backoff
+            _consecutiveFailures = 0;
+            _backoffUntil = DateTime.MinValue;
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { _logger.LogWarning(ex, "Claude.ai sync pass failed (non-fatal)"); }
+        catch (Exception ex)
+        {
+            _consecutiveFailures++;
+            var idx = Math.Min(_consecutiveFailures - 1, BackoffIntervals.Length - 1);
+            _backoffUntil = DateTime.UtcNow + BackoffIntervals[idx];
+
+            _logger.LogWarning("ClaudeAi sync failed (attempt {Attempt}, backing off until {BackoffUntil}): {Message}",
+                _consecutiveFailures, _backoffUntil, ex.Message);
+        }
     }
 
     private async Task BulkSyncAsync(ClaudeAiClient client, CancellationToken ct)

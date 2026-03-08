@@ -36,6 +36,8 @@ internal static class Program
                 .WriteTo.File(logPath,
                     rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 7,
+                    fileSizeLimitBytes: 50_000_000,
+                    rollOnFileSizeLimit: true,
                     outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
                     shared: true,
                     flushToDiskInterval: TimeSpan.FromSeconds(5))

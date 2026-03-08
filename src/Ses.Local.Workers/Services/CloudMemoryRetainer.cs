@@ -16,6 +16,12 @@ public sealed class CloudMemoryRetainer
     private readonly ILogger<CloudMemoryRetainer> _logger;
     private static readonly JsonSerializerOptions s_json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
+    // DNS health check state — avoids hammering an unresolvable host
+    private bool _dnsAvailable = true;
+    private DateTime _dnsRetryAfter = DateTime.MinValue;
+    private bool _dnsWarningLogged;
+    private static readonly TimeSpan DnsRetryInterval = TimeSpan.FromHours(1);
+
     public CloudMemoryRetainer(IHttpClientFactory httpClientFactory, ILogger<CloudMemoryRetainer> logger)
     {
         _httpClientFactory = httpClientFactory;
@@ -34,6 +40,19 @@ public sealed class CloudMemoryRetainer
         CancellationToken ct = default)
     {
         if (messages.Count == 0) return true; // nothing to retain
+
+        // Check DNS availability — skip if previously failed and retry window hasn't elapsed
+        if (!_dnsAvailable)
+        {
+            if (DateTime.UtcNow < _dnsRetryAfter) return true; // silently skip
+
+            // Retry window elapsed — attempt DNS resolution
+            _dnsAvailable = await CheckDnsAsync(ct);
+            if (!_dnsAvailable) return true;
+
+            _logger.LogInformation("Cloud memory service DNS resolved — re-enabling cloud memory sync");
+            _dnsWarningLogged = false;
+        }
 
         // Extract the observation: first assistant response summary
         var firstAssistant = messages
@@ -78,10 +97,10 @@ public sealed class CloudMemoryRetainer
 
             return true;
         }
-        catch (HttpRequestException ex) when (ex.StatusCode is null)
+        catch (HttpRequestException ex) when (IsDnsOrNetworkError(ex))
         {
-            _logger.LogDebug("Memory service unreachable — skipping retain");
-            return true; // Network down is not a sync failure
+            HandleDnsFailure(ex);
+            return true; // DNS/network failure is not a sync failure
         }
         catch (Exception ex)
         {
@@ -89,4 +108,38 @@ public sealed class CloudMemoryRetainer
             return false;
         }
     }
+
+    private async Task<bool> CheckDnsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var http = _httpClientFactory.CreateClient(DependencyInjection.CloudMemoryClientName);
+            var host = http.BaseAddress?.Host;
+            if (string.IsNullOrEmpty(host)) return false;
+
+            await System.Net.Dns.GetHostEntryAsync(host, ct);
+            return true;
+        }
+        catch
+        {
+            _dnsRetryAfter = DateTime.UtcNow + DnsRetryInterval;
+            return false;
+        }
+    }
+
+    private void HandleDnsFailure(HttpRequestException ex)
+    {
+        _dnsAvailable = false;
+        _dnsRetryAfter = DateTime.UtcNow + DnsRetryInterval;
+
+        if (!_dnsWarningLogged)
+        {
+            _logger.LogWarning("Cloud memory service unavailable ({Message}) — cloud memory sync disabled. Will retry in 1 hour",
+                ex.Message);
+            _dnsWarningLogged = true;
+        }
+    }
+
+    private static bool IsDnsOrNetworkError(HttpRequestException ex) =>
+        ex.StatusCode is null; // null StatusCode = network/DNS error, not HTTP error
 }
