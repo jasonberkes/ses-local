@@ -73,6 +73,7 @@ internal static class Program
         builder.Services.AddHostedService<AutoUpdateWorker>();
         builder.Services.AddHostedService<SesMcpManagerWorker>();
         builder.Services.AddHostedService<ClaudeDesktopSyncWorker>();
+        builder.Services.AddHostedService<CompressionWorker>();
 
         var app = builder.Build();
 
