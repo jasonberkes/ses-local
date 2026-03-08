@@ -21,30 +21,40 @@ export async function* listConversations() {
   let offset = 0;
   const limit = 50;
   while (true) {
-    const res = await rateLimited(() =>
-      fetch(
-        `${CHATGPT_BASE}/backend-api/conversations?offset=${offset}&limit=${limit}&order=updated`,
-        { credentials: 'include' }
-      )
-    );
-    if (!res.ok) break;
-    const data = await res.json();
-    const items = data.items ?? [];
-    if (items.length === 0) break;
-    for (const item of items) yield item;
-    if (items.length < limit) break;
-    offset += limit;
+    try {
+      const res = await rateLimited(() =>
+        fetch(
+          `${CHATGPT_BASE}/backend-api/conversations?offset=${offset}&limit=${limit}&order=updated`,
+          { credentials: 'include' }
+        )
+      );
+      if (!res.ok) break;
+      const data = await res.json();
+      const items = data.items ?? [];
+      if (items.length === 0) break;
+      for (const item of items) yield item;
+      if (items.length < limit) break;
+      offset += limit;
+    } catch (err) {
+      console.warn('[ses-local] listConversations failed:', err.message);
+      break;
+    }
   }
 }
 
 export async function getConversation(conversationId) {
   return rateLimited(async () => {
-    const res = await fetch(
-      `${CHATGPT_BASE}/backend-api/conversation/${conversationId}`,
-      { credentials: 'include' }
-    );
-    if (!res.ok) return null;
-    return await res.json();
+    try {
+      const res = await fetch(
+        `${CHATGPT_BASE}/backend-api/conversation/${conversationId}`,
+        { credentials: 'include' }
+      );
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (err) {
+      console.warn('[ses-local] getConversation failed:', err.message);
+      return null;
+    }
   });
 }
 

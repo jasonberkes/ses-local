@@ -28,4 +28,7 @@ public interface IAuthService
 
     /// <summary>Gets the current MCP PAT for use by the browser extension listener.</summary>
     Task<string?> GetPatAsync(CancellationToken ct = default);
+
+    /// <summary>Validates the OAuth state parameter from the callback against the pending state.</summary>
+    bool ValidateOAuthState(string? state);
 }

@@ -1,3 +1,5 @@
+import { isValidPat } from './utils.js';
+
 const patInput   = document.getElementById('pat');
 const saveBtn    = document.getElementById('save');
 const syncBtn    = document.getElementById('sync');
@@ -40,6 +42,7 @@ async function loadStatus() {
 saveBtn.addEventListener('click', async () => {
   const pat = patInput.value.trim();
   if (!pat) { showMsg('Enter a PAT first', true); return; }
+  if (!isValidPat(pat)) { showMsg('Invalid PAT format — expected a JWT token (xxx.yyy.zzz)', true); return; }
   await chrome.storage.local.set({ ses_pat: pat });
   patInput.value = '';
   showMsg('PAT saved.');

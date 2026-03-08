@@ -235,12 +235,15 @@ public sealed class BrowserExtensionListenerTests
 
         var refreshToken = "integration_refresh_token";
         var accessToken  = TestJwtHelper.CreateFakeJwt(DateTime.UtcNow.AddMinutes(15));
+        var oauthState   = "test-state-value";
+        auth.SetPendingOAuthStateForTest(oauthState);
 
         using var http = new HttpClient();
         var resp = await http.GetAsync(
             $"http://localhost:{port}/auth/callback" +
             $"?refresh={Uri.EscapeDataString(refreshToken)}" +
-            $"&access={Uri.EscapeDataString(accessToken)}",
+            $"&access={Uri.EscapeDataString(accessToken)}" +
+            $"&state={Uri.EscapeDataString(oauthState)}",
             cts.Token);
 
         // HTTP response must be 200 with success HTML
