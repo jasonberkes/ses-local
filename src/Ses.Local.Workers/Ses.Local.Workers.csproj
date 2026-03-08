@@ -1,8 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- All types in this assembly are preserved via trimmer-roots.xml when publishing trimmed apps -->
-  <PropertyGroup>
-    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-  </PropertyGroup>
   <!-- On Windows, also build the WinRT-enabled TFM so WindowsCredentialStore compiles -->
   <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <TargetFrameworks>net10.0;net10.0-windows10.0.19041.0</TargetFrameworks>

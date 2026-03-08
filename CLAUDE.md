@@ -74,7 +74,7 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 | Project | Tests | Coverage |
 |---------|-------|----------|
 | `Ses.Local.Core.Tests` | 48 | Options validation, model serialization, utility services |
-| `Ses.Local.Workers.Tests` | 424 | Worker unit tests, service tests, telemetry, DaemonSupervisor |
+| `Ses.Local.Workers.Tests` | 427 | Worker unit tests, service tests, telemetry, DaemonSupervisor |
 | `Ses.Local.Integration.Tests` | 55 | SQLite CRUD, vector search, JSONL parsing (real temp DB) |
 
 ## Key Patterns
@@ -102,8 +102,8 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 
 ### Data Storage
 - SQLite at `~/.ses/local.db` via `ILocalDbService`
-- Tables: `conv_sessions`, `conv_messages`, `conv_observations`, `observation_links`, `conv_session_summaries`, `conv_embeddings`, `conv_relationships`, `conv_workitem_links`, `sync_metadata`
-- FTS5 index: `conv_messages_fts`
+- Tables: `conv_sessions`, `conv_messages`, `conv_observations`, `conv_observation_links`, `conv_session_summaries`, `conv_embeddings`, `conv_relationships`, `conv_workitem_links`, `memory_observations`, `memory_summaries`, `sync_ledger`, `import_history`, `sync_metadata`
+- FTS5 indexes: `conv_messages_fts`, `conv_observations_fts`, `conv_session_summaries_fts`
 
 ### Vector Search
 - ONNX model: `all-MiniLM-L6-v2` (384-dim, auto-downloaded to `~/.ses/models/`)
@@ -224,7 +224,7 @@ Central package versioning via `Directory.Packages.props`.
 
 ### Test Locally
 1. `dotnet build` — ensure 0 errors, 0 warnings
-2. `dotnet test` — all 423 tests must pass
+2. `dotnet test` — all 530 tests must pass
 3. Run daemon: `dotnet run --project src/Ses.Local.Daemon`
 4. Daemon listens on `~/.ses/local.sock` (Unix socket)
 5. Integration tests use real temp SQLite instances

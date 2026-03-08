@@ -1,8 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- All types in this assembly are preserved via trimmer-roots.xml when publishing trimmed apps -->
-  <PropertyGroup>
-    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
-  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />

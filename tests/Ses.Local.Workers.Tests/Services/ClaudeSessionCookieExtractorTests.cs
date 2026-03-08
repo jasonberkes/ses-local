@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Ses.Local.Workers.Tests.Services;
 
-public sealed class ClaudeApiClientTests
+public sealed class ClaudeSessionCookieExtractorTests
 {
     [Fact]
     public void GetCookiePath_ContainsClaude()
