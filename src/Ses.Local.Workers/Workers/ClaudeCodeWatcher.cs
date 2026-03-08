@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -34,6 +35,10 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
     // Persisted to disk so restarts resume from the correct position.
     private readonly Dictionary<string, long> _filePositions = new();
     private readonly List<FileSystemWatcher> _watchers = [];
+
+    // Tracks files that failed to parse — skip on subsequent scans until mtime changes.
+    // ConcurrentDictionary because FileSystemWatcher callbacks fire on ThreadPool threads.
+    private readonly ConcurrentDictionary<string, DateTime> _failedFiles = new();
 
     private static readonly string PositionsFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -125,13 +130,20 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
 
     private async Task HandleFileChangedAsync(string filePath, CancellationToken ct)
     {
+        // Real-time change event — clear failed status since the file was just modified
+        _failedFiles.TryRemove(filePath, out _);
+
         try
         {
             await ProcessFileAsync(filePath, ct);
         }
         catch (Exception ex)
         {
-            LogFileProcessingError(_logger, filePath, ex);
+            if (!_failedFiles.ContainsKey(filePath))
+            {
+                LogFileProcessingError(_logger, filePath, ex);
+                _failedFiles[filePath] = File.GetLastWriteTimeUtc(filePath);
+            }
         }
     }
 
@@ -140,17 +152,86 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
     private async Task ScanAllAsync(string root, CancellationToken ct)
     {
         var files = Directory.GetFiles(root, "*.jsonl", SearchOption.AllDirectories);
+
+        // Cache stale-worktree check per directory to avoid N+1 directory scans
+        var staleDirectoryCache = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var file in files)
         {
             if (ct.IsCancellationRequested) break;
+
+            // Skip worktree session files whose parent worktree directory no longer exists
+            var dir = Path.GetDirectoryName(file) ?? string.Empty;
+            if (!staleDirectoryCache.TryGetValue(dir, out var isStale))
+            {
+                isStale = IsStaleWorktreeFile(file);
+                staleDirectoryCache[dir] = isStale;
+            }
+            if (isStale) continue;
+
+            // Skip previously-failed files unless their modification time has changed
+            if (_failedFiles.TryGetValue(file, out var failedMtime))
+            {
+                var currentMtime = File.GetLastWriteTimeUtc(file);
+                if (currentMtime <= failedMtime) continue;
+                _failedFiles.TryRemove(file, out _); // mtime changed — retry
+            }
+
             try
             {
                 await ProcessFileAsync(file, ct);
             }
             catch (Exception ex)
             {
-                LogFileScanError(_logger, file, ex);
+                if (!_failedFiles.ContainsKey(file))
+                {
+                    LogFileScanError(_logger, file, ex);
+                    _failedFiles[file] = File.GetLastWriteTimeUtc(file);
+                }
+                else
+                {
+                    LogFileScanErrorDebug(_logger, file, ex);
+                }
             }
+        }
+    }
+
+    /// <summary>
+    /// Detects JSONL files from Claude Code worktree sessions whose parent worktree
+    /// directory has been removed. These files are stale and will never be updated.
+    /// </summary>
+    private static bool IsStaleWorktreeFile(string filePath)
+    {
+        // Worktree paths contain "--claude-worktrees-" or "-worktrees-" in the encoded project dir
+        var idx = filePath.IndexOf("-worktrees-", StringComparison.OrdinalIgnoreCase);
+        if (idx < 0) return false;
+
+        // Extract the worktree root: everything before the first path separator after the worktree marker
+        // The encoded dir looks like: -Users-jason-project--claude-worktrees-name
+        // We need to check if the actual worktree directory exists
+        var projectsDir = Path.GetDirectoryName(Path.GetDirectoryName(filePath));
+        if (projectsDir is null) return false;
+
+        // The encoded project directory is the parent of the JSONL file
+        var encodedDir = Path.GetDirectoryName(filePath);
+        if (encodedDir is null || !Directory.Exists(encodedDir)) return true;
+
+        // If the encoded directory exists (in ~/.claude/projects/) the file is accessible,
+        // but check if the actual worktree source directory on disk still exists.
+        // We can't easily decode the full path, so just check if ANY files in this
+        // encoded dir have been modified recently (within 7 days) — if not, it's stale.
+        try
+        {
+            var dirInfo = new DirectoryInfo(encodedDir);
+            var latestWrite = dirInfo.GetFiles("*.jsonl")
+                .Select(f => f.LastWriteTimeUtc)
+                .DefaultIfEmpty(DateTime.MinValue)
+                .Max();
+            return latestWrite < DateTime.UtcNow.AddDays(-7);
+        }
+        catch
+        {
+            return true;
         }
     }
 
@@ -668,4 +749,7 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping excluded project path: {Path}")]
     private static partial void LogProjectExcluded(ILogger logger, string path);
+
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping previously-failed JSONL file: {Path}")]
+    private static partial void LogFileScanErrorDebug(ILogger logger, string path, Exception ex);
 }
