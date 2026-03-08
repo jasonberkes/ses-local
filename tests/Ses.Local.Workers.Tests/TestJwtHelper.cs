@@ -12,9 +12,6 @@ internal static class TestJwtHelper
         return $"{header}.{payload}.fakesig";
     }
 
-    public static string Base64UrlEncode(string input)
-    {
-        var bytes = System.Text.Encoding.UTF8.GetBytes(input);
-        return Convert.ToBase64String(bytes).Replace("+", "-").Replace("/", "_").TrimEnd('=');
-    }
+    public static string Base64UrlEncode(string input) =>
+        Ses.Local.Workers.Services.Base64Url.Encode(System.Text.Encoding.UTF8.GetBytes(input));
 }

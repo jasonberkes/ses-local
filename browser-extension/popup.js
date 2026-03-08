@@ -1,3 +1,5 @@
+import { isValidPat } from './utils.js';
+
 const patInput   = document.getElementById('pat');
 const saveBtn    = document.getElementById('save');
 const syncBtn    = document.getElementById('sync');
@@ -35,13 +37,6 @@ async function loadStatus() {
 
   claudeSyncTime.textContent  = `Claude.ai last sync: ${fmtTime(res.claudeLastSyncTs)}`;
   chatgptSyncTime.textContent = `ChatGPT last sync: ${fmtTime(res.chatgptLastSyncTs)}`;
-}
-
-function isValidPat(pat) {
-  // PATs are JWTs — must have 3 dot-separated base64 segments
-  if (!pat || typeof pat !== 'string') return false;
-  const parts = pat.trim().split('.');
-  return parts.length === 3 && parts.every(p => p.length > 0);
 }
 
 saveBtn.addEventListener('click', async () => {

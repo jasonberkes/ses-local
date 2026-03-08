@@ -96,12 +96,7 @@ public sealed class LicenseValidationClient
         }
     }
 
-    private static byte[] Base64UrlDecode(string base64Url)
-    {
-        var padded = base64Url.Replace('-', '+').Replace('_', '/');
-        padded = (padded.Length % 4) switch { 2 => padded + "==", 3 => padded + "=", _ => padded };
-        return Convert.FromBase64String(padded);
-    }
+    private static byte[] Base64UrlDecode(string base64Url) => Base64Url.Decode(base64Url);
 }
 
 public sealed record LicenseValidationResponse

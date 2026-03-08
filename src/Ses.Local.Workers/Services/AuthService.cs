@@ -129,8 +129,7 @@ public sealed class AuthService : IAuthService
             return Task.CompletedTask;
         }
 
-        var state = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
-            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        var state = Base64Url.Encode(RandomNumberGenerator.GetBytes(32));
         _pendingOAuthState = state;
 
         var url = $"{_loginUrl}?reauth=true&state={Uri.EscapeDataString(state)}";
@@ -262,12 +261,7 @@ public sealed class AuthService : IAuthService
             var parts = jwt.Split('.');
             if (parts.Length < 2) return DateTime.UtcNow.AddMinutes(15);
 
-            var padded = parts[1].Replace('-', '+').Replace('_', '/');
-            var rem = padded.Length % 4;
-            if (rem == 2) padded += "==";
-            else if (rem == 3) padded += "=";
-
-            var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(padded));
+            var json = System.Text.Encoding.UTF8.GetString(Base64Url.Decode(parts[1]));
             using var doc = System.Text.Json.JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("exp", out var expProp) && expProp.TryGetInt64(out var exp))
                 return DateTimeOffset.FromUnixTimeSeconds(exp).UtcDateTime;
