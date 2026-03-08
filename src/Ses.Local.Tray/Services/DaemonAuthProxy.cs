@@ -269,6 +269,16 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
         catch { return null; }
     }
 
+    /// <summary>Returns the latest health report from /api/health, or null if daemon unreachable.</summary>
+    public async Task<HealthReport?> GetHealthAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await _http.GetFromJsonAsync<HealthReport>("/api/health", s_jsonOptions, ct);
+        }
+        catch { return null; }
+    }
+
     /// <summary>Returns recently active Claude Code sessions from /api/sessions/active, or null if daemon unreachable.</summary>
     public async Task<IReadOnlyList<ActiveSessionInfo>?> GetActiveSessionsAsync(CancellationToken ct = default)
     {

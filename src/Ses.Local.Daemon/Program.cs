@@ -75,6 +75,10 @@ internal static class Program
         builder.Services.AddHostedService<ClaudeDesktopSyncWorker>();
         builder.Services.AddHostedService<CompressionWorker>();
 
+        // HealthMonitorWorker registered as singleton so /api/health can access the same instance
+        builder.Services.AddSingleton<HealthMonitorWorker>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<HealthMonitorWorker>());
+
         var app = builder.Build();
 
         var startTimestamp = Stopwatch.GetTimestamp();
@@ -299,6 +303,9 @@ internal static class Program
             };
             return Results.Ok(new { applied = result.UpdateApplied, newVersion = result.NewVersion, message = result.Message });
         });
+
+        app.MapGet("/api/health", (HealthMonitorWorker health) =>
+            Results.Ok(health.LatestReport));
 
         app.MapGet("/api/sessions/active", async (ILocalDbService db, HttpContext ctx) =>
         {
