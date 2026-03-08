@@ -37,9 +37,17 @@ async function loadStatus() {
   chatgptSyncTime.textContent = `ChatGPT last sync: ${fmtTime(res.chatgptLastSyncTs)}`;
 }
 
+function isValidPat(pat) {
+  // PATs are JWTs — must have 3 dot-separated base64 segments
+  if (!pat || typeof pat !== 'string') return false;
+  const parts = pat.trim().split('.');
+  return parts.length === 3 && parts.every(p => p.length > 0);
+}
+
 saveBtn.addEventListener('click', async () => {
   const pat = patInput.value.trim();
   if (!pat) { showMsg('Enter a PAT first', true); return; }
+  if (!isValidPat(pat)) { showMsg('Invalid PAT format — expected a JWT token (xxx.yyy.zzz)', true); return; }
   await chrome.storage.local.set({ ses_pat: pat });
   patInput.value = '';
   showMsg('PAT saved.');

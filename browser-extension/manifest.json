@@ -11,7 +11,6 @@
   "host_permissions": [
     "https://claude.ai/*",
     "https://chatgpt.com/*",
-    "https://chat.openai.com/*",
     "http://localhost:37780/*"
   ],
   "background": {
@@ -32,7 +31,7 @@
     "128": "icons/icon128.png"
   },
   "content_security_policy": {
-    "extension_pages": "default-src 'self'; connect-src https://claude.ai https://chatgpt.com https://chat.openai.com http://localhost:37780"
+    "extension_pages": "default-src 'self'; connect-src https://claude.ai https://chatgpt.com http://localhost:37780"
   },
   "browser_specific_settings": {
     "gecko": {

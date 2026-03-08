@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Ses.Local.Core.Interfaces;
@@ -33,6 +34,9 @@ public sealed class AuthService : IAuthService
     private int _reauthInProgress;
     private volatile bool _loginTimedOut;
 
+    // OAuth CSRF protection: random state parameter verified on callback (consumed atomically via Interlocked)
+    private string? _pendingOAuthState;
+
     public AuthService(
         ICredentialStore keychain,
         IdentityClient identity,
@@ -59,6 +63,7 @@ public sealed class AuthService : IAuthService
 
         // Clear any pending reauth state
         _loginTimedOut = false;
+        _pendingOAuthState = null;
         Interlocked.Exchange(ref _reauthInProgress, 0);
 
         // Derive and store PAT for ses-mcp
@@ -124,7 +129,11 @@ public sealed class AuthService : IAuthService
             return Task.CompletedTask;
         }
 
-        var url = $"{_loginUrl}?reauth=true";
+        var state = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        _pendingOAuthState = state;
+
+        var url = $"{_loginUrl}?reauth=true&state={Uri.EscapeDataString(state)}";
         _logger.LogInformation("Triggering re-auth: {Url}", url);
         OpenBrowser(url);
 
@@ -176,6 +185,16 @@ public sealed class AuthService : IAuthService
 
     public async Task<string?> GetPatAsync(CancellationToken ct = default) =>
         await _keychain.GetAsync(KeyPat, ct);
+
+    public bool ValidateOAuthState(string? state)
+    {
+        if (string.IsNullOrEmpty(state)) return false;
+        var expected = Interlocked.Exchange(ref _pendingOAuthState, null);
+        return expected is not null && string.Equals(expected, state, StringComparison.Ordinal);
+    }
+
+    /// <summary>Sets the pending OAuth state for testing. Production code uses TriggerReauthAsync.</summary>
+    internal void SetPendingOAuthStateForTest(string state) => _pendingOAuthState = state;
 
     // ── Private ───────────────────────────────────────────────────────────────
 

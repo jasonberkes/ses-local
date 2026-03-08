@@ -142,6 +142,9 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
     public Task<string?> GetPatAsync(CancellationToken ct = default)
         => Task.FromResult<string?>(null); // Tray doesn't need PATs
 
+    public bool ValidateOAuthState(string? state)
+        => throw new NotSupportedException("OAuth callbacks are handled by the daemon, not the tray.");
+
     /// <summary>
     /// Triggers a background import on the daemon and returns immediately (202 Accepted).
     /// Poll <see cref="GetImportStatusAsync"/> for progress updates.

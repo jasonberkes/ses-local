@@ -8,11 +8,22 @@ namespace Ses.Local.Core.Interfaces;
 /// </summary>
 public interface ILocalDbService
 {
+    /// <summary>Inserts or updates a conversation session (conflict key: source + external_id).</summary>
     Task UpsertSessionAsync(ConversationSession session, CancellationToken ct = default);
+
+    /// <summary>Inserts or updates a batch of messages for a session.</summary>
     Task UpsertMessagesAsync(IEnumerable<ConversationMessage> messages, CancellationToken ct = default);
+
+    /// <summary>Returns sessions not yet synced to the cloud, up to the specified batch size.</summary>
     Task<IReadOnlyList<ConversationSession>> GetPendingSyncAsync(int batchSize = 10, CancellationToken ct = default);
+
+    /// <summary>Marks a session as synced to the cloud with the given document service ID.</summary>
     Task MarkSyncedAsync(long sessionId, string? docServiceId, CancellationToken ct = default);
+
+    /// <summary>Returns all messages for a session, ordered chronologically.</summary>
     Task<IReadOnlyList<ConversationMessage>> GetMessagesAsync(long sessionId, CancellationToken ct = default);
+
+    /// <summary>Full-text search across message content.</summary>
     Task<IReadOnlyList<ConversationMessage>> SearchAsync(string query, int limit = 10, CancellationToken ct = default);
 
     /// <summary>
