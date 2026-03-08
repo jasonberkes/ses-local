@@ -237,7 +237,19 @@ Central package versioning via `Directory.Packages.props`.
 | `~/.ses/local.sock` | Daemon Unix domain socket |
 | `~/.ses/models/` | ONNX model directory |
 | `~/.ses/watcher-positions.json` | Incremental JSONL parsing state |
+| `~/.ses/logs/daemon-YYYYMMDD.log` | Daemon log files (daily rotation, 7-day retention) |
+| `~/.ses/logs/tray-YYYYMMDD.log` | Tray log files (daily rotation, 7-day retention) |
 | `~/.claude/projects/**/*.jsonl` | Claude Code conversation logs |
+
+## Logging
+
+- **Serilog** file sink on both daemon and tray (`Serilog.AspNetCore` + `Serilog.Sinks.File`)
+- Log files at `~/.ses/logs/` — daily rotation, 7-day retention, 5-second flush interval
+- Log levels configured via `appsettings.json` `Serilog.MinimumLevel` section — `Microsoft`, `System.Net.Http`, and `Polly` suppressed to `Warning`; ses-local code logs at `Information`
+- **Daemon** also writes to console (for direct process monitoring); tray writes file-only
+- `GET /api/logs?lines=N&level=LEVEL` — reads latest daemon log file, returns last N lines (default 50), optionally filtered by level (`INF`, `WRN`, `ERR`)
+- `DaemonAuthProxy.GetLogsAsync(lines, level, ct)` — tray-side proxy method for the logs endpoint
+- **View Logs...** tray menu item opens `~/.ses/logs/` in Finder/Explorer via `OsOpen.Launch`
 
 ## Coding Standards
 

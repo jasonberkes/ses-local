@@ -340,6 +340,7 @@ public sealed class DaemonSupervisor : IDisposable
                 return null;
             }
 
+            _logger.LogInformation("Daemon started at {DaemonPath}, PID {ProcessId}", path, process.Id);
             return new RealLaunchedProcess(process);
         }
         catch (Exception ex)

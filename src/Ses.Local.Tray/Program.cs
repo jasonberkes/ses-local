@@ -2,6 +2,7 @@ using Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
+using Serilog;
 using Ses.Local.Core.Interfaces;
 using Ses.Local.Core.Options;
 using Ses.Local.Core.Services;
@@ -22,7 +23,24 @@ internal static class Program
             return;
         }
 
+        var logDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".ses", "logs");
+        Directory.CreateDirectory(logDir);
+
+        var logPath = Path.Combine(logDir, "tray-.log");
+
         var host = Host.CreateDefaultBuilder(args)
+            .UseSerilog((ctx, config) => config
+                .ReadFrom.Configuration(ctx.Configuration)
+                .WriteTo.File(logPath,
+                    rollingInterval: RollingInterval.Day,
+                    retainedFileCountLimit: 7,
+                    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
+                    shared: true,
+                    flushToDiskInterval: TimeSpan.FromSeconds(5))
+                .Enrich.FromLogContext()
+                .Enrich.WithProperty("App", "ses-local-tray"))
             .ConfigureServices((ctx, services) =>
             {
                 // SesLocal options — URLs are configurable via appsettings.json
