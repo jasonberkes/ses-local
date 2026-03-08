@@ -74,7 +74,7 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 | Project | Tests | Coverage |
 |---------|-------|----------|
 | `Ses.Local.Core.Tests` | 48 | Options validation, model serialization, utility services |
-| `Ses.Local.Workers.Tests` | 427 | Worker unit tests, service tests, telemetry, DaemonSupervisor |
+| `Ses.Local.Workers.Tests` | 435 | Worker unit tests, service tests, telemetry, DaemonSupervisor |
 | `Ses.Local.Integration.Tests` | 55 | SQLite CRUD, vector search, JSONL parsing (real temp DB) |
 
 ## Key Patterns
@@ -129,7 +129,7 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 ### Credential Store
 - Platform-specific: `MacCredentialStore` (macOS) / `WindowsCredentialStore` (Windows) / `InMemoryCredentialStore` (Linux/CI)
 
-## Background Workers (11)
+## Background Workers (12)
 
 | Worker | Purpose |
 |--------|---------|
@@ -144,6 +144,40 @@ The old daemon plist (`com.supereasysoftware.ses-local.plist`) is deprecated but
 | `CompressionWorker` | Observation compression + embedding + cross-session linking |
 | `AutoUpdateWorker` | Checks/downloads binary updates |
 | `SesMcpManagerWorker` | ses-mcp auto-installation and updates |
+| `HealthMonitorWorker` | Self-healing health monitor — checks all components every 30 s, auto-repairs |
+
+### HealthMonitorWorker (OBS-4)
+
+Monitors all daemon components every **30 seconds**. Exposes results at `GET /api/health`.
+
+**Checks:**
+
+| Check | Category | What it verifies |
+|-------|----------|-----------------|
+| `Auth` | Auth | OAuth token valid; triggers reauth if expired |
+| `ses-mcp` | Config | ses-mcp binary exists at `~/.ses/bin/ses-mcp` |
+| `ClaudeDesktop` | Config | Claude Desktop MCP config present and no drift |
+| `CCHooks` | Config | ses-hooks registered correctly in `~/.claude/settings.json` |
+| `Socket` | Infrastructure | IPC Unix socket file exists |
+| `SQLite` | Storage | SQLite DB accessible (queries `GetSyncStatsAsync`) |
+
+**Auto-repair:** When `ClaudeDesktop` or `ses-mcp` checks are degraded/unhealthy, calls `SesMcpManager.CheckAndRepairAsync()` with exponential backoff:
+- Before attempt 2: wait 30 s
+- Before attempt 3: wait 90 s
+- After 3 attempts: blocked until 1-hour window resets
+
+**GET /api/health response:**
+```json
+{
+  "checkedAt": "2026-03-07T00:00:00Z",
+  "status": "Healthy|Degraded|Unhealthy",
+  "checks": [
+    { "name": "Auth", "category": "Auth", "status": "Healthy", "message": "Authenticated", "repairAttempts": 0 }
+  ]
+}
+```
+
+**Registration:** Singleton + `AddHostedService` pattern so the `/api/health` endpoint shares the same instance.
 
 ### ChatGPT Desktop Storage Format (investigated 2026-03-06)
 
@@ -224,7 +258,7 @@ Central package versioning via `Directory.Packages.props`.
 
 ### Test Locally
 1. `dotnet build` — ensure 0 errors, 0 warnings
-2. `dotnet test` — all 530 tests must pass
+2. `dotnet test` — all 538 tests must pass
 3. Run daemon: `dotnet run --project src/Ses.Local.Daemon`
 4. Daemon listens on `~/.ses/local.sock` (Unix socket)
 5. Integration tests use real temp SQLite instances
