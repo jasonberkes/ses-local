@@ -24,8 +24,13 @@ public sealed partial class CloudSyncWorker : BackgroundService
     private readonly ILogger<CloudSyncWorker> _logger;
 
     private const int BatchSize = 10;
-    private static readonly TimeSpan ActiveInterval = TimeSpan.FromMinutes(2);
-    private static readonly TimeSpan IdleInterval   = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan ActiveInterval       = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan IdleInterval         = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan UnauthorizedCooldown = TimeSpan.FromHours(1);
+
+    // Prevents hammering DocumentService when PAT lacks required scopes.
+    // Reset on next sync pass after cooldown expires.
+    private DateTime _unauthorizedUntil = DateTime.MinValue;
 
     public CloudSyncWorker(
         ILocalDbService db,
@@ -65,6 +70,14 @@ public sealed partial class CloudSyncWorker : BackgroundService
 
     private async Task<int> RunSyncPassAsync(CancellationToken ct)
     {
+        // Skip uploads if we received 403 recently — PAT missing required scopes.
+        // Guard is before StartActivity to avoid allocating a trace span for no-op passes.
+        if (DateTime.UtcNow < _unauthorizedUntil)
+        {
+            LogDocServiceUnauthorizedCooldown(_logger, _unauthorizedUntil);
+            return 0;
+        }
+
         using var activity = SesLocalMetrics.ActivitySource.StartActivity("CloudSyncWorker.SyncPass");
 
         var pat = await _auth.GetAccessTokenAsync(ct);
@@ -111,6 +124,14 @@ public sealed partial class CloudSyncWorker : BackgroundService
                 SesLocalMetrics.UploadsSucceeded.Add(1);
                 synced++;
             }
+            catch (UnauthorizedAccessException)
+            {
+                // 403 from DocumentService — PAT missing TenantId claim or docs:write scope.
+                // Stop the entire batch; don't mark sessions as synced so they retry later.
+                _unauthorizedUntil = DateTime.UtcNow + UnauthorizedCooldown;
+                LogDocServiceUnauthorized(_logger, _unauthorizedUntil);
+                break;
+            }
             catch (Exception ex)
             {
                 SesLocalMetrics.UploadsFailed.Add(1);
@@ -144,4 +165,12 @@ public sealed partial class CloudSyncWorker : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "CloudSyncWorker: sync pass failed (non-fatal)")]
     private static partial void LogSyncPassFailed(ILogger logger, Exception ex);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "CloudSyncWorker: DocumentService returned 403 — PAT missing TenantId claim or docs:write scope. Upload paused until {RetryAfter:u}")]
+    private static partial void LogDocServiceUnauthorized(ILogger logger, DateTime retryAfter);
+
+    [LoggerMessage(Level = LogLevel.Debug,
+        Message = "CloudSyncWorker: DocumentService uploads paused (403 cooldown) — will retry after {RetryAfter:u}")]
+    private static partial void LogDocServiceUnauthorizedCooldown(ILogger logger, DateTime retryAfter);
 }

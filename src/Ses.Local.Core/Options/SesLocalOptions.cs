@@ -16,8 +16,9 @@ public sealed class SesLocalOptions
     public string DocumentServiceBaseUrl { get; init; } =
         "https://tm-documentservice-prod-eus2.redhill-040b1667.eastus2.azurecontainerapps.io";
 
-    /// <summary>Cloud memory service base URL.</summary>
-    public string MemoryBaseUrl { get; init; } = "https://memory.tm.supereasysoftware.com";
+    /// <summary>Cloud memory service base URL. Routes through DocumentService (no standalone memory service).</summary>
+    public string MemoryBaseUrl { get; init; } =
+        "https://tm-documentservice-prod-eus2.redhill-040b1667.eastus2.azurecontainerapps.io";
 
     /// <summary>Claude.ai web app base URL (used for session sync).</summary>
     public string ClaudeAiBaseUrl { get; init; } = "https://claude.ai";
