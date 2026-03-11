@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 
 namespace Ses.Local.Core.Services;
@@ -24,6 +25,36 @@ public static class DaemonSocketPath
 
     public static bool IsAvailable()
         => File.Exists(GetPath());
+
+    /// <summary>
+    /// Returns true if the daemon is actively listening on the socket.
+    /// On Unix, attempts a real connection to distinguish a live daemon from a stale
+    /// socket file left by a crash. On Windows, named pipes auto-clean on process exit
+    /// so file existence is sufficient.
+    /// </summary>
+    public static bool IsConnectable() => IsConnectable(GetPath());
+
+    /// <summary>Checks connectivity at the given path. Overload for testability.</summary>
+    public static bool IsConnectable(string path)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return File.Exists(path);
+
+        // Fast exit: skip socket allocation when the file doesn't exist yet
+        // (common during daemon startup polling).
+        if (!File.Exists(path)) return false;
+
+        using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+        try
+        {
+            socket.Connect(new UnixDomainSocketEndPoint(path));
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     /// <summary>
     /// Remove stale socket file left by a previous daemon crash.

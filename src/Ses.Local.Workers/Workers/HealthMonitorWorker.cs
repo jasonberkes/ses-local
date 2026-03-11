@@ -209,15 +209,15 @@ public sealed class HealthMonitorWorker : BackgroundService
 
     private HealthCheckResult CheckSocket()
     {
-        var path = DaemonSocketPath.GetPath();
-        // The socket always exists while we're running — check it's accessible
-        if (File.Exists(path))
+        // Use a connection test, not just File.Exists — verifies Kestrel is actively bound,
+        // not just that the filesystem entry exists.
+        if (DaemonSocketPath.IsConnectable())
         {
             ResetRepairCounter(CheckNames.Socket);
             return Healthy(CheckNames.Socket, "Infrastructure", "IPC socket accessible");
         }
 
-        return Unhealthy(CheckNames.Socket, "Infrastructure", "Socket missing");
+        return Unhealthy(CheckNames.Socket, "Infrastructure", "Socket missing or not connectable");
     }
 
     private async Task<HealthCheckResult> CheckSqliteAsync(CancellationToken ct)
