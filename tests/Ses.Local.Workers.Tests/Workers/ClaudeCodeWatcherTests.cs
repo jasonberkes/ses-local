@@ -7,6 +7,7 @@ using Ses.Local.Core.Models;
 using Ses.Local.Core.Options;
 using Ses.Local.Workers.Services;
 using Ses.Local.Workers.Workers;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace Ses.Local.Workers.Tests.Workers;
@@ -150,5 +151,149 @@ public sealed class ClaudeCodeWatcherTests
         // Normal project path — not a worktree
         var result = (bool)method.Invoke(null, ["/Users/test/.claude/projects/-Users-test-myproject/session.jsonl"])!;
         Assert.False(result);
+    }
+
+    // ── ExtractContent — Bug 1 regression tests ───────────────────────────────
+
+    private static readonly System.Reflection.MethodInfo ExtractContentMethod =
+        typeof(ClaudeCodeWatcher).GetMethod("ExtractContent",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+
+    private static string InvokeExtractContent(JsonNode? msgNode) =>
+        (string)ExtractContentMethod.Invoke(null, [msgNode])!;
+
+    [Fact]
+    public void ExtractContent_NullMsgNode_ReturnsEmpty()
+    {
+        var result = InvokeExtractContent(null);
+        Assert.Equal(string.Empty, result);
+    }
+
+    [Fact]
+    public void ExtractContent_SimpleStringContent_ReturnsString()
+    {
+        var msgNode = JsonNode.Parse("""{"role":"user","content":"Hello world"}""");
+        var result = InvokeExtractContent(msgNode);
+        Assert.Equal("Hello world", result);
+    }
+
+    [Fact]
+    public void ExtractContent_AssistantTextBlock_ReturnsText()
+    {
+        var msgNode = JsonNode.Parse("""
+            {"role":"assistant","content":[{"type":"text","text":"I can help with that."}]}
+            """);
+        var result = InvokeExtractContent(msgNode);
+        Assert.Equal("I can help with that.", result);
+    }
+
+    [Fact]
+    public void ExtractContent_ToolResultWithStringContent_ExtractsString()
+    {
+        // tool_result where content is a plain string (older format)
+        var msgNode = JsonNode.Parse("""
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_abc",
+                  "content": "Simple string result"
+                }
+              ]
+            }
+            """);
+        var result = InvokeExtractContent(msgNode);
+        Assert.Contains("Simple string result", result);
+    }
+
+    [Fact]
+    public void ExtractContent_ToolResultWithArrayContent_ExtractsTextBlocks()
+    {
+        // tool_result where content is an array of text blocks (newer CC format)
+        // This was the root cause of Bug 1 — GetValue<string>() threw on a JsonArray.
+        var msgNode = JsonNode.Parse("""
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_abc",
+                  "content": [
+                    {"type": "text", "text": "Result line 1"},
+                    {"type": "text", "text": "Result line 2"}
+                  ]
+                }
+              ]
+            }
+            """);
+        var result = InvokeExtractContent(msgNode);
+        Assert.Contains("Result line 1", result);
+        Assert.Contains("Result line 2", result);
+    }
+
+    [Fact]
+    public void ExtractContent_ToolResultWithObjectContent_ReturnsJsonString()
+    {
+        // tool_result where content is a JsonObject (edge case — should not throw)
+        var msgNode = JsonNode.Parse("""
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "tool_result",
+                  "tool_use_id": "toolu_abc",
+                  "content": {"type": "text", "text": "nested object"}
+                }
+              ]
+            }
+            """);
+        // Should not throw — returns ToJsonString() fallback
+        var ex = Record.Exception(() => InvokeExtractContent(msgNode));
+        Assert.Null(ex);
+    }
+
+    // ── Concurrent HandleFileChangedAsync — Bug 2/3 regression test ──────────
+
+    [Fact]
+    public async Task HandleFileChangedAsync_ConcurrentCalls_AllCompleteWithoutError()
+    {
+        // Arrange — a JSONL file that produces one message per parse
+        var tempDir    = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        var sessionDir = Path.Combine(tempDir, "encoded-project-dir");
+        Directory.CreateDirectory(sessionDir);
+        var filePath = Path.Combine(sessionDir, "concurrent-test.jsonl");
+
+        var jsonl = """
+            {"type":"user","message":{"role":"user","content":"Hello"},"sessionId":"s1","uuid":"u1","timestamp":"2026-01-01T00:00:00Z","cwd":"/tmp/proj","gitBranch":"main"}
+            {"type":"assistant","message":{"role":"assistant","model":"claude-opus-4","usage":{"input_tokens":5,"output_tokens":5},"content":[{"type":"text","text":"Hi"}]},"uuid":"a1","timestamp":"2026-01-01T00:00:01Z"}
+            """;
+        await File.WriteAllTextAsync(filePath, jsonl);
+
+        var db = new Mock<ILocalDbService>();
+        db.Setup(x => x.UpsertSessionAsync(It.IsAny<ConversationSession>(), It.IsAny<CancellationToken>()))
+          .Callback<ConversationSession, CancellationToken>((s, _) => s.Id = 1)
+          .Returns(Task.CompletedTask);
+        db.Setup(x => x.UpsertMessagesAsync(It.IsAny<IEnumerable<ConversationMessage>>(), It.IsAny<CancellationToken>()))
+          .Returns(Task.CompletedTask);
+
+        var watcher = new ClaudeCodeWatcher(db.Object, NoOpGenerator().Object, NoOpWorkItemLinker(),
+            NullLogger<ClaudeCodeWatcher>.Instance, DefaultOptions);
+
+        var handleMethod = typeof(ClaudeCodeWatcher).GetMethod("HandleFileChangedAsync",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        // Act — fire 5 concurrent change events for the same file
+        var tasks = Enumerable.Range(0, 5)
+            .Select(_ => (Task)handleMethod.Invoke(watcher, [filePath, CancellationToken.None])!)
+            .ToList();
+
+        var ex = await Record.ExceptionAsync(() => Task.WhenAll(tasks));
+
+        // Assert — no exception; the semaphore serialized concurrent DB writes
+        Assert.Null(ex);
+
+        // Cleanup
+        Directory.Delete(tempDir, recursive: true);
     }
 }

@@ -40,6 +40,15 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
     // ConcurrentDictionary because FileSystemWatcher callbacks fire on ThreadPool threads.
     private readonly ConcurrentDictionary<string, DateTime> _failedFiles = new();
 
+    // Serializes concurrent DB writes from FileSystemWatcher callbacks.
+    // FSW can fire multiple Changed events simultaneously for the same file;
+    // SQLite shared connection does not support concurrent transactions.
+    private readonly SemaphoreSlim _dbWriteSemaphore = new(1, 1);
+
+    // Tracks last time an error was logged per file to suppress repeated warnings.
+    private readonly ConcurrentDictionary<string, DateTime> _lastErrorLogTime = new();
+    private static readonly TimeSpan ErrorLogSuppressWindow = TimeSpan.FromMinutes(5);
+
     private static readonly string PositionsFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".ses", "watcher-positions.json");
@@ -130,20 +139,36 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
 
     private async Task HandleFileChangedAsync(string filePath, CancellationToken ct)
     {
-        // Real-time change event — clear failed status since the file was just modified
+        // Real-time change event — clear failed/suppressed state so the scan retries
         _failedFiles.TryRemove(filePath, out _);
+        _lastErrorLogTime.TryRemove(filePath, out _);
 
+        // Serialize DB writes: FSW can fire many concurrent events; the shared SQLite
+        // connection does not support overlapping transactions.
+        await _dbWriteSemaphore.WaitAsync(ct);
         try
         {
             await ProcessFileAsync(filePath, ct);
         }
         catch (Exception ex)
         {
-            if (!_failedFiles.ContainsKey(filePath))
+            // Use UtcNow as fallback so a recreated file (newer mtime) always passes the retry gate
+            var mtime = File.Exists(filePath) ? File.GetLastWriteTimeUtc(filePath) : DateTime.UtcNow;
+            _failedFiles[filePath] = mtime;
+
+            // Rate-limit logging: suppress repeated errors for the same file within the
+            // suppress window so a continuously-updated file doesn't flood the log.
+            var now = DateTime.UtcNow;
+            if (!_lastErrorLogTime.TryGetValue(filePath, out var lastLog) ||
+                now - lastLog > ErrorLogSuppressWindow)
             {
                 LogFileProcessingError(_logger, filePath, ex);
-                _failedFiles[filePath] = File.GetLastWriteTimeUtc(filePath);
+                _lastErrorLogTime[filePath] = now;
             }
+        }
+        finally
+        {
+            _dbWriteSemaphore.Release();
         }
     }
 
@@ -438,10 +463,7 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
 
                 case "tool_result":
                 {
-                    var rawContent = block["content"];
-                    var content    = rawContent is JsonValue
-                        ? rawContent.GetValue<string>()
-                        : rawContent?.ToJsonString() ?? string.Empty;
+                    var content = ExtractToolResultContent(block["content"]);
                     content = content.Trim();
                     if (stripPrivateTags) content = PrivateTagStripper.Strip(content);
 
@@ -672,10 +694,7 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
                     parts.Add($"[tool_use:{toolName}] {toolInput}");
                     break;
                 case "tool_result":
-                    var resultContent = block?["content"]?.GetValue<string>()
-                                     ?? block?["content"]?.ToJsonString()
-                                     ?? string.Empty;
-                    parts.Add($"[tool_result] {resultContent}");
+                    parts.Add($"[tool_result] {ExtractToolResultContent(block?["content"])}");
                     break;
                 case "thinking":
                     var thinking = block?["thinking"]?.GetValue<string>();
@@ -686,6 +705,22 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
         }
 
         return string.Join("\n", parts);
+    }
+
+    /// <summary>
+    /// Extracts the string content from a tool_result content node, which can be:
+    /// - a plain string (JsonValue)  — returned as-is
+    /// - an array of content blocks  — text fields joined with newlines
+    /// - any other JsonNode          — serialised with ToJsonString()
+    /// </summary>
+    private static string ExtractToolResultContent(JsonNode? raw)
+    {
+        if (raw is JsonValue jv) return jv.GetValue<string>();
+        if (raw is JsonArray ja)
+            return string.Join("\n", ja
+                .Select(b => b?["text"] is JsonValue tv ? tv.GetValue<string>() : null)
+                .Where(s => !string.IsNullOrEmpty(s)));
+        return raw?.ToJsonString() ?? string.Empty;
     }
 
     private static DateTime ParseTimestamp(JsonNode? node)
@@ -752,4 +787,10 @@ public sealed partial class ClaudeCodeWatcher : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Skipping previously-failed JSONL file: {Path}")]
     private static partial void LogFileScanErrorDebug(ILogger logger, string path, Exception ex);
+
+    public override void Dispose()
+    {
+        _dbWriteSemaphore.Dispose();
+        base.Dispose();
+    }
 }
