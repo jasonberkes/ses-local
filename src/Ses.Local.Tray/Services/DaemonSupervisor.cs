@@ -53,7 +53,9 @@ public sealed class DaemonSupervisor : IDisposable
         _logger              = logger;
         _delay               = Task.Delay;
         _timeProvider        = TimeProvider.System;
-        _isSocketAvailable   = DaemonSocketPath.IsAvailable;
+        // Use connection-based check: distinguishes a live daemon from a stale socket file
+        // left by a crash. File.Exists alone cannot tell them apart.
+        _isSocketAvailable   = DaemonSocketPath.IsConnectable;
         _launchProcess       = LaunchRealProcess;
         _sendShutdown        = ct => authProxy.ShutdownAsync(ct);
         _shutdownGracePeriod = TimeSpan.FromSeconds(5);
@@ -85,10 +87,6 @@ public sealed class DaemonSupervisor : IDisposable
     {
         if (_supervisionTask is { IsCompleted: false })
             return;
-
-        // Remove stale socket left by a previous daemon crash so the supervisor
-        // always launches a fresh daemon rather than falsely detecting one running.
-        DaemonSocketPath.CleanupStaleSocket();
 
         _cts = new CancellationTokenSource();
         // Task.Run ensures the supervision loop runs on a thread pool thread,
@@ -171,6 +169,8 @@ public sealed class DaemonSupervisor : IDisposable
             }
             else
             {
+                // Socket not found (or not connectable) — remove any stale file before launching.
+                DaemonSocketPath.CleanupStaleSocket();
                 SetStatus(DaemonStatus.Starting);
                 _process = _launchProcess(GetDaemonPath());
 
@@ -235,6 +235,8 @@ public sealed class DaemonSupervisor : IDisposable
 
             await _delay(backoff, ct);
 
+            // Clean up the stale socket from the crashed daemon before relaunching.
+            DaemonSocketPath.CleanupStaleSocket();
             _process?.Dispose();
             _process = _launchProcess(GetDaemonPath());
 

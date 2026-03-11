@@ -79,4 +79,38 @@ public sealed class DaemonSocketPathTests
 
         Assert.False(DaemonSocketPath.IsAvailable());
     }
+
+    [Fact]
+    public void IsConnectable_ReturnsFalseWhenNoSocketFile()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return; // Windows named pipes self-clean; connection test not applicable
+
+        // Use a temp path so we never touch the real (possibly live) daemon socket.
+        var path = Path.Combine(Path.GetTempPath(), $"ses-test-{Guid.NewGuid():N}.sock");
+        Assert.False(DaemonSocketPath.IsConnectable(path));
+    }
+
+    [Fact]
+    public void IsConnectable_ReturnsFalseForStaleSocketFile()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return;
+
+        var dir  = Path.Combine(Path.GetTempPath(), $"ses-test-{Guid.NewGuid():N}");
+        var path = Path.Combine(dir, "daemon.sock");
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            // A regular file at the socket path simulates a crash-left stale socket.
+            // No listener is bound, so IsConnectable should return false.
+            File.WriteAllText(path, "stale");
+            Assert.False(DaemonSocketPath.IsConnectable(path));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }
