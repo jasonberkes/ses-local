@@ -607,6 +607,29 @@ public sealed class LocalDbServiceIntegrationTests : IAsyncDisposable
         Assert.Equal("/a", history[1].FilePath);
     }
 
+    [Fact]
+    public async Task GetImportHistoryAsync_ErrorsField_IsReadCorrectly()
+    {
+        // Regression test for Bug 4: ArgumentOutOfRangeException when reading
+        // column index 7 (Errors). Verifies the bounds-checked reader path works.
+        var record = new ImportHistoryRecord
+        {
+            Source            = "claude",
+            FilePath          = "/tmp/test.json",
+            ImportedAt        = DateTime.UtcNow,
+            SessionsImported  = 1,
+            MessagesImported  = 10,
+            DuplicatesSkipped = 2,
+            Errors            = 3,
+        };
+        await _fixture.Db.RecordImportHistoryAsync(record);
+
+        var history = await _fixture.Db.GetImportHistoryAsync(1);
+
+        Assert.Single(history);
+        Assert.Equal(3, history[0].Errors);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static ConversationSession MakeSession(string externalId, string title, ConversationSource source = ConversationSource.ClaudeCode) =>
