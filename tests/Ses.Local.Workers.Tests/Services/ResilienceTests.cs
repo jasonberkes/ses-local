@@ -209,7 +209,7 @@ public sealed class ResilienceTests
 
         var client = factory.CreateClient(DependencyInjection.CloudMemoryClientName);
         Assert.NotNull(client);
-        Assert.Equal(new Uri("https://memory.tm.supereasysoftware.com"), client.BaseAddress);
+        Assert.Equal(new Uri("https://tm-documentservice-prod-eus2.redhill-040b1667.eastus2.azurecontainerapps.io"), client.BaseAddress);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

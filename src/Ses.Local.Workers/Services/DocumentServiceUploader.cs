@@ -81,6 +81,12 @@ public sealed class DocumentServiceUploader
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var response = await http.PostAsync("api/v1/documents", content, ct);
 
+            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                throw new UnauthorizedAccessException(
+                    "DocumentService returned 403 — PAT missing TenantId claim or docs:write scope");
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 var body = await response.Content.ReadAsStringAsync(ct);
@@ -96,6 +102,10 @@ public sealed class DocumentServiceUploader
 
             _logger.LogDebug("Uploaded transcript for session {Id} → doc {DocId}", session.Id, docId);
             return docId;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            throw; // 403 — propagate to CloudSyncWorker to stop the batch
         }
         catch (Exception ex)
         {
