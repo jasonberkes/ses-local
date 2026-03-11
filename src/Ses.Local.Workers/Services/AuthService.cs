@@ -235,7 +235,7 @@ public sealed class AuthService : IAuthService
             var pat = await _identity.CreatePatAsync(
                 accessToken,
                 name: "ses-mcp",
-                scopes: ["memory:local", "memory:cloud", "conv:read", "docs:read", "docs:write"],
+                scopes: ["memory:local", "memory:cloud", "conv:read", "doc:read", "doc:write"],
                 ct);
 
             if (pat?.Token is not null)
