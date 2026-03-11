@@ -224,6 +224,14 @@ public sealed class AuthService : IAuthService
         _cachedAccessToken       = result.AccessToken;
         _cachedAccessTokenExpiry = result.AccessTokenExpiresAt;
 
+        // Derive PAT if missing from keychain (e.g. deleted or first refresh after reauth)
+        var existingPat = await GetPatAsync(ct);
+        if (string.IsNullOrEmpty(existingPat))
+        {
+            _logger.LogInformation("No PAT in keychain — deriving after token refresh");
+            await DerivePat(result.AccessToken, ct);
+        }
+
         _logger.LogDebug("Access token renewed. Expires: {Expiry}", result.AccessTokenExpiresAt);
         return result.AccessToken;
     }

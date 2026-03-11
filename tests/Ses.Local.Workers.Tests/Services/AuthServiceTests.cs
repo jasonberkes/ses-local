@@ -116,6 +116,60 @@ public sealed class AuthServiceTests
         Assert.Equal(newRefresh, storedRefresh);
     }
 
+    [Fact]
+    public async Task RenewAccessToken_WhenPatMissing_DerivesPat()
+    {
+        var keychain = new InMemoryCredentialStore();
+        await keychain.SetAsync("ses-local-refresh", "stored-refresh-token");
+
+        var newAccess  = CreateFakeJwt(DateTime.UtcNow.AddMinutes(15));
+        var newRefresh = "new-refresh-token";
+
+        var refreshResponse = new RefreshResponse(
+            newAccess, newRefresh,
+            DateTime.UtcNow.AddMinutes(15),
+            DateTime.UtcNow.AddDays(90));
+
+        var handler  = new PatTrackingHttpHandler(refreshResponse);
+        var http     = new HttpClient(handler) { BaseAddress = new Uri("https://identity.test/") };
+        var identity = new IdentityClient(http, NullLogger<IdentityClient>.Instance);
+        var sut      = new AuthService(keychain, identity, NullLogger<AuthService>.Instance,
+            Options.Create(new SesLocalOptions()));
+
+        // No PAT in keychain — renewal should trigger DerivePat
+        var result = await sut.GetAccessTokenAsync();
+
+        Assert.Equal(newAccess, result);
+        Assert.True(handler.PatEndpointCalled, "Expected POST to api/v1/tokens (PAT derivation) during token refresh");
+    }
+
+    [Fact]
+    public async Task RenewAccessToken_WhenPatExists_SkipsDerivation()
+    {
+        var keychain = new InMemoryCredentialStore();
+        await keychain.SetAsync("ses-local-refresh", "stored-refresh-token");
+        await keychain.SetAsync("ses-local-pat", "existing-pat-token");
+
+        var newAccess  = CreateFakeJwt(DateTime.UtcNow.AddMinutes(15));
+        var newRefresh = "new-refresh-token";
+
+        var refreshResponse = new RefreshResponse(
+            newAccess, newRefresh,
+            DateTime.UtcNow.AddMinutes(15),
+            DateTime.UtcNow.AddDays(90));
+
+        var handler  = new PatTrackingHttpHandler(refreshResponse);
+        var http     = new HttpClient(handler) { BaseAddress = new Uri("https://identity.test/") };
+        var identity = new IdentityClient(http, NullLogger<IdentityClient>.Instance);
+        var sut      = new AuthService(keychain, identity, NullLogger<AuthService>.Instance,
+            Options.Create(new SesLocalOptions()));
+
+        var result = await sut.GetAccessTokenAsync();
+
+        Assert.Equal(newAccess, result);
+        Assert.False(handler.PatEndpointCalled, "PAT derivation should be skipped when PAT already exists");
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static string CreateFakeJwt(DateTime expiry) => TestJwtHelper.CreateFakeJwt(expiry);
@@ -128,6 +182,34 @@ public sealed class AuthServiceTests
                 return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized));
 
             var json = System.Text.Json.JsonSerializer.Serialize(response,
+                new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
+            });
+        }
+    }
+
+    /// <summary>Tracks whether the PAT endpoint (api/v1/tokens) was called, while returning valid refresh responses.</summary>
+    private sealed class PatTrackingHttpHandler(RefreshResponse refreshResponse) : HttpMessageHandler
+    {
+        public bool PatEndpointCalled { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (request.RequestUri?.AbsolutePath.EndsWith("/tokens") == true)
+            {
+                PatEndpointCalled = true;
+                // Return a valid PAT response
+                var patJson = """{"token":"tm_pat_derived"}""";
+                return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+                {
+                    Content = new StringContent(patJson, System.Text.Encoding.UTF8, "application/json")
+                });
+            }
+
+            // Return refresh response for token renewal
+            var json = System.Text.Json.JsonSerializer.Serialize(refreshResponse,
                 new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
             return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
             {

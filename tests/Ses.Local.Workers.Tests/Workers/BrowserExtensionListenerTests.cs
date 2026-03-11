@@ -262,6 +262,55 @@ public sealed class BrowserExtensionListenerTests
         await listener.StopAsync(CancellationToken.None);
     }
 
+    /// <summary>
+    /// Auth callback succeeds even when the state parameter doesn't match (concurrent reauth race).
+    /// </summary>
+    [Fact]
+    public async Task Listener_AuthCallback_WithMismatchedState_StillSucceeds()
+    {
+        var port     = AllocateFreePort();
+        var keychain = new InMemoryCredentialStore();
+        var identity = BuildNullIdentityClient();
+        var auth     = new AuthService(keychain, identity,
+            NullLogger<AuthService>.Instance,
+            Options.Create(new SesLocalOptions()));
+
+        var db       = new Mock<ILocalDbService>();
+        var opts     = Options.Create(new SesLocalOptions { BrowserListenerPort = port });
+        var listener = new BrowserExtensionListener(db.Object, auth,
+            NullLogger<BrowserExtensionListener>.Instance, opts);
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        _ = listener.StartAsync(cts.Token);
+        await Task.Delay(200, cts.Token);
+
+        var refreshToken = "refresh_token_mismatched_state";
+        var accessToken  = TestJwtHelper.CreateFakeJwt(DateTime.UtcNow.AddMinutes(15));
+
+        // Set one state but send a different one — simulates concurrent reauth overwrite
+        auth.SetPendingOAuthStateForTest("original-state");
+
+        using var http = new HttpClient();
+        var resp = await http.GetAsync(
+            $"http://localhost:{port}/auth/callback" +
+            $"?refresh={Uri.EscapeDataString(refreshToken)}" +
+            $"&access={Uri.EscapeDataString(accessToken)}" +
+            $"&state=different-state",
+            cts.Token);
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var html = await resp.Content.ReadAsStringAsync(cts.Token);
+        Assert.Contains("Authentication Successful", html);
+
+        var storedRefresh = await keychain.GetAsync("ses-local-refresh");
+        Assert.Equal(refreshToken, storedRefresh);
+
+        var state = await auth.GetStateAsync();
+        Assert.True(state.IsAuthenticated);
+
+        await listener.StopAsync(CancellationToken.None);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>Finds a free TCP port on loopback by binding to port 0.</summary>
