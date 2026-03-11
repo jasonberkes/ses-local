@@ -53,7 +53,6 @@ internal static class Program
                 fileSizeLimitBytes: 50_000_000,
                 rollOnFileSizeLimit: true,
                 outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
-                shared: true,
                 flushToDiskInterval: TimeSpan.FromSeconds(5))
             .Enrich.FromLogContext()
             .Enrich.WithProperty("App", "ses-local-daemon"));
