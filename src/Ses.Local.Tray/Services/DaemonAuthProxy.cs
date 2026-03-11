@@ -134,7 +134,24 @@ public sealed class DaemonAuthProxy : IAuthService, IDisposable
     }
 
     public Task HandleAuthCallbackAsync(string refreshToken, string accessToken, CancellationToken ct = default)
-        => Task.CompletedTask; // Daemon handles auth callbacks
+        => Task.CompletedTask; // Daemon handles auth callbacks directly via BrowserExtensionListener
+
+    /// <summary>
+    /// Forwards OAuth tokens received via the ses-local:// URL scheme to the daemon for storage.
+    /// Called by the tray's macOS Apple Event handler after URL scheme activation.
+    /// </summary>
+    public async Task ForwardAuthCallbackAsync(string refreshToken, string accessToken, CancellationToken ct = default)
+    {
+        try
+        {
+            using var response = await _http.PostAsJsonAsync(
+                "/api/auth/callback",
+                new { refreshToken, accessToken },
+                ct);
+            response.EnsureSuccessStatusCode();
+        }
+        catch { /* daemon unreachable — user will need to re-authenticate */ }
+    }
 
     public Task<string?> GetAccessTokenAsync(CancellationToken ct = default)
         => Task.FromResult<string?>(null); // Tray doesn't need access tokens

@@ -111,6 +111,46 @@ public partial class TrayApp : Application
 
         _supervisor.Start();
         Dispatcher.UIThread.InvokeAsync(() => UpdateStatusAsync());
+
+        if (OperatingSystem.IsMacOS())
+        {
+            var proxy = services.GetRequiredService<DaemonAuthProxy>();
+            MacUrlHandler.Register(url => _ = HandleUrlActivationAsync(url, proxy));
+        }
+    }
+
+    private static async Task HandleUrlActivationAsync(string url, DaemonAuthProxy proxy)
+    {
+        try
+        {
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return;
+            if (!string.Equals(uri.Scheme, "ses-local", StringComparison.OrdinalIgnoreCase)) return;
+            if (!string.Equals(uri.AbsolutePath, "/auth/callback", StringComparison.OrdinalIgnoreCase)) return;
+
+            var (refresh, access) = ParseAuthCallbackQuery(uri.Query);
+            if (string.IsNullOrEmpty(refresh) || string.IsNullOrEmpty(access)) return;
+
+            await proxy.ForwardAuthCallbackAsync(refresh, access);
+        }
+        catch
+        {
+            // Non-fatal: URL activation failures should not crash the tray
+        }
+    }
+
+    private static (string? refresh, string? access) ParseAuthCallbackQuery(string query)
+    {
+        string? refresh = null, access = null;
+        foreach (var param in query.TrimStart('?').Split('&'))
+        {
+            var eq = param.IndexOf('=');
+            if (eq < 0) continue;
+            var key = Uri.UnescapeDataString(param[..eq]);
+            var val = Uri.UnescapeDataString(param[(eq + 1)..]);
+            if (key == "refresh") refresh = val;
+            else if (key == "access") access = val;
+        }
+        return (refresh, access);
     }
 
     // ── menu construction ─────────────────────────────────────────────────────
