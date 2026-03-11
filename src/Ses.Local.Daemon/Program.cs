@@ -104,6 +104,7 @@ internal static class Program
         var app = builder.Build();
 
         var startTimestamp = Stopwatch.GetTimestamp();
+        var jsonOptions    = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
         // IPC endpoints served over Unix domain socket
         app.MapGet("/api/status", async (IAuthService auth, ILicenseService license) =>
@@ -137,8 +138,7 @@ internal static class Program
         app.MapPost("/api/license/activate", async (HttpContext ctx, ILicenseService license) =>
         {
             var body = await System.Text.Json.JsonSerializer.DeserializeAsync<LicenseActivateRequest>(
-                ctx.Request.Body,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                ctx.Request.Body, jsonOptions);
 
             if (body is null || string.IsNullOrWhiteSpace(body.LicenseKey))
                 return Results.BadRequest(new { error = "License key is required." });
@@ -160,8 +160,7 @@ internal static class Program
         app.MapPost("/api/conversations/import", async (HttpContext ctx, ConversationImportDispatcher dispatcher, ImportProgressTracker tracker, ILocalDbService db) =>
         {
             var body = await System.Text.Json.JsonSerializer.DeserializeAsync<ImportConversationsRequest>(
-                ctx.Request.Body,
-                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                ctx.Request.Body, jsonOptions);
 
             if (body is null || string.IsNullOrWhiteSpace(body.FilePath))
                 return Results.BadRequest(new { error = "filePath is required." });
@@ -222,6 +221,19 @@ internal static class Program
         {
             await auth.SignOutAsync();
             return Results.Ok(new { message = "Signed out" });
+        });
+
+        // Receives tokens forwarded by the tray app after a ses-local:// URL scheme callback.
+        app.MapPost("/api/auth/callback", async (HttpContext ctx, IAuthService auth) =>
+        {
+            var body = await System.Text.Json.JsonSerializer.DeserializeAsync<AuthCallbackRequest>(
+                ctx.Request.Body, jsonOptions);
+
+            if (body?.RefreshToken is null || body?.AccessToken is null)
+                return Results.BadRequest(new { error = "Missing refreshToken or accessToken" });
+
+            await auth.HandleAuthCallbackAsync(body.RefreshToken, body.AccessToken, ctx.RequestAborted);
+            return Results.Ok(new { message = "Authentication successful" });
         });
 
         app.MapGet("/api/components", (SesMcpManager mcpManager) =>
@@ -495,6 +507,12 @@ internal sealed record LicenseActivateRequest
 internal sealed record ImportConversationsRequest
 {
     public string FilePath { get; init; } = string.Empty;
+}
+
+internal sealed record AuthCallbackRequest
+{
+    public string? RefreshToken { get; init; }
+    public string? AccessToken  { get; init; }
 }
 
 /// <summary>
