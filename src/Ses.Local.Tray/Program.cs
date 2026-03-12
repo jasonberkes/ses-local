@@ -15,61 +15,112 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        // Single-instance enforcement via named mutex
-        using var mutex = new Mutex(true, "com.supereasysoftware.ses-local-tray", out var isNewInstance);
-        if (!isNewInstance)
+        var pidPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".ses", "tray.pid");
+
+        // Primary: PID file lock (works across all macOS launch contexts)
+        if (!TryAcquirePidLock(pidPath))
         {
             Console.Error.WriteLine("ses-local tray is already running.");
             return;
         }
 
-        var logDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            ".ses", "logs");
-        Directory.CreateDirectory(logDir);
+        // Secondary: named mutex (fast check within the same launch context)
+        using var mutex = new Mutex(true, "com.supereasysoftware.ses-local-tray", out var isNewInstance);
+        if (!isNewInstance)
+        {
+            Console.Error.WriteLine("ses-local tray is already running.");
+            try { File.Delete(pidPath); } catch { }
+            return;
+        }
 
-        var logPath = Path.Combine(logDir, "tray-.log");
+        try
+        {
+            var logDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".ses", "logs");
+            Directory.CreateDirectory(logDir);
 
-        var host = Host.CreateDefaultBuilder(args)
-            .UseSerilog((ctx, config) => config
-                .ReadFrom.Configuration(ctx.Configuration)
-                .WriteTo.File(logPath,
-                    rollingInterval: RollingInterval.Day,
-                    retainedFileCountLimit: 7,
-                    fileSizeLimitBytes: 50_000_000,
-                    rollOnFileSizeLimit: true,
-                    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
-                    flushToDiskInterval: TimeSpan.FromSeconds(5))
-                .Enrich.FromLogContext()
-                .Enrich.WithProperty("App", "ses-local-tray"))
-            .ConfigureServices((ctx, services) =>
+            var logPath = Path.Combine(logDir, "tray-.log");
+
+            var host = Host.CreateDefaultBuilder(args)
+                .UseSerilog((ctx, config) => config
+                    .ReadFrom.Configuration(ctx.Configuration)
+                    .WriteTo.File(logPath,
+                        rollingInterval: RollingInterval.Day,
+                        retainedFileCountLimit: 7,
+                        fileSizeLimitBytes: 50_000_000,
+                        rollOnFileSizeLimit: true,
+                        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
+                        flushToDiskInterval: TimeSpan.FromSeconds(5))
+                    .Enrich.FromLogContext()
+                    .Enrich.WithProperty("App", "ses-local-tray"))
+                .ConfigureServices((ctx, services) =>
+                {
+                    // SesLocal options — URLs are configurable via appsettings.json
+                    services.Configure<SesLocalOptions>(ctx.Configuration.GetSection(SesLocalOptions.SectionName));
+                    services.AddSingleton<IValidateOptions<SesLocalOptions>, SesLocalOptionsValidator>();
+                    services.AddOptions<SesLocalOptions>().ValidateOnStart();
+
+                    // DaemonAuthProxy connects to daemon via Unix domain socket
+                    services.AddSingleton<DaemonAuthProxy>();
+                    services.AddSingleton<IAuthService>(sp => sp.GetRequiredService<DaemonAuthProxy>());
+
+                    // MCP config manager — reads/writes host config files
+                    services.AddSingleton<IMcpConfigManager, McpConfigManager>();
+
+                    // DaemonSupervisor manages daemon lifecycle with crash recovery
+                    services.AddSingleton<DaemonSupervisor>();
+
+                    // DiagnosticBundleService (OBS-3)
+                    services.AddSingleton<DiagnosticBundleService>();
+                })
+                .Build();
+
+            // Store services so TrayApp can access them in OnFrameworkInitializationCompleted.
+            // app.Instance is null until StartWithClassicDesktopLifetime creates the Application.
+            TrayApp.PendingServices = host.Services;
+
+            var app = BuildAvaloniaApp();
+            app.StartWithClassicDesktopLifetime(args);
+        }
+        finally
+        {
+            try { File.Delete(pidPath); } catch { }
+        }
+    }
+
+    private static bool TryAcquirePidLock(string pidPath)
+    {
+        try
+        {
+            if (File.Exists(pidPath))
             {
-                // SesLocal options — URLs are configurable via appsettings.json
-                services.Configure<SesLocalOptions>(ctx.Configuration.GetSection(SesLocalOptions.SectionName));
-                services.AddSingleton<IValidateOptions<SesLocalOptions>, SesLocalOptionsValidator>();
-                services.AddOptions<SesLocalOptions>().ValidateOnStart();
+                var existingPid = File.ReadAllText(pidPath).Trim();
+                if (int.TryParse(existingPid, out var pid))
+                {
+                    try
+                    {
+                        var process = System.Diagnostics.Process.GetProcessById(pid);
+                        if (process.ProcessName.Contains("ses-local", StringComparison.OrdinalIgnoreCase))
+                            return false; // Another instance is running
+                    }
+                    catch (ArgumentException)
+                    {
+                        // Process doesn't exist — stale PID file, fall through to overwrite
+                    }
+                }
+            }
 
-                // DaemonAuthProxy connects to daemon via Unix domain socket
-                services.AddSingleton<DaemonAuthProxy>();
-                services.AddSingleton<IAuthService>(sp => sp.GetRequiredService<DaemonAuthProxy>());
-
-                // MCP config manager — reads/writes host config files
-                services.AddSingleton<IMcpConfigManager, McpConfigManager>();
-
-                // DaemonSupervisor manages daemon lifecycle with crash recovery
-                services.AddSingleton<DaemonSupervisor>();
-
-                // DiagnosticBundleService (OBS-3)
-                services.AddSingleton<DiagnosticBundleService>();
-            })
-            .Build();
-
-        // Store services so TrayApp can access them in OnFrameworkInitializationCompleted.
-        // app.Instance is null until StartWithClassicDesktopLifetime creates the Application.
-        TrayApp.PendingServices = host.Services;
-
-        var app = BuildAvaloniaApp();
-        app.StartWithClassicDesktopLifetime(args);
+            Directory.CreateDirectory(Path.GetDirectoryName(pidPath)!);
+            File.WriteAllText(pidPath, Environment.ProcessId.ToString());
+            return true;
+        }
+        catch
+        {
+            return true; // PID file I/O failure — allow startup rather than block on edge cases
+        }
     }
 
     private static AppBuilder BuildAvaloniaApp()
